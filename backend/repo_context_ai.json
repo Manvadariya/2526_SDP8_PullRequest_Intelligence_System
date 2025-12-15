@@ -1,0 +1,90 @@
+{
+  "generated_at": "2025-12-15T11:11:37.767831+00:00",
+  "repo": {
+    "full_name": "shubham-vaishnav-13/GitDemo",
+    "description": null,
+    "default_branch": "main",
+    "topics": [],
+    "languages": {
+      "C++": 338
+    }
+  },
+  "high_level": {
+    "readme": "",
+    "recent_commits": [
+      {
+        "sha": "be20e0a5882ab716b58de6f543e6bafd357dfefa",
+        "message": "Added Seccond file",
+        "author": "shubham-vaishnav-13",
+        "date": "2025-12-15T09:27:48Z"
+      },
+      {
+        "sha": "d39cf4782225c81c20266819aaf2c4e120a52abe",
+        "message": "added new file",
+        "author": "shubham-vaishnav-13",
+        "date": "2025-12-15T09:25:59Z"
+      }
+    ]
+  },
+  "structure": {
+    "files": [
+      {
+        "path": "new.cpp",
+        "type": "blob",
+        "size": 169,
+        "sha": "5b039859881dbb39d50098db47a83a188592e238",
+        "mode": "100644"
+      },
+      {
+        "path": "second.cpp",
+        "type": "blob",
+        "size": 169,
+        "sha": "5b039859881dbb39d50098db47a83a188592e238",
+        "mode": "100644"
+      }
+    ]
+  },
+  "content": {
+    "files": {
+      "new.cpp": "#include<bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nint main()\n{\n    int tcase;\n    cin >> tcase;\n    while (tcase--)\n    {\n        \n    }\n    return 0;\n}",
+      "second.cpp": "#include<bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nint main()\n{\n    int tcase;\n    cin >> tcase;\n    while (tcase--)\n    {\n        \n    }\n    return 0;\n}"
+    }
+  },
+  "limits": {
+    "include_file_contents": true,
+    "max_total_chars": 40000,
+    "max_file_chars": 4000,
+    "max_files_with_content": 10,
+    "allowed_extensions": [
+      ".c",
+      ".cc",
+      ".cfg",
+      ".cpp",
+      ".css",
+      ".h",
+      ".hpp",
+      ".htm",
+      ".html",
+      ".ini",
+      ".java",
+      ".js",
+      ".json",
+      ".jsx",
+      ".kt",
+      ".md",
+      ".ps1",
+      ".py",
+      ".sh",
+      ".sql",
+      ".toml",
+      ".ts",
+      ".tsx",
+      ".txt",
+      ".yaml",
+      ".yml"
+    ],
+    "include_tree_entries": 2000,
+    "chars_used": 338,
+    "files_included_with_content": 2
+  }
+}

@@ -48,4 +48,8 @@ The application will be available at `http://localhost:5173` (or the port shown 
 
 ## History
 
-- 8 Dec 2025 : Added Basic Project setup + Added frontend sections
+- LAB 1 : 8 Dec 2025 : Added Basic Project setup + Added frontend sections
+
+- LAB 2 : Added basic workflow in n8n and github api's to fetch PR data and diffs
+
+![alt text](image.png)
