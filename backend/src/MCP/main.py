@@ -20,7 +20,6 @@ assert or_key, "Error: OPENROUTER_API_KEY cannot be empty. Update .env"
 
 
 # Check Environment
-# assert groq_key, "Error: GROQ_API_KEY cannot be empty. Update .env"
 
 assert hf_token, "Error: HF_TOKEN cannot be empty. Update .env"
 
