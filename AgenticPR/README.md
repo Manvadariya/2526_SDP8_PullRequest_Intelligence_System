@@ -50,6 +50,8 @@ The application will be available at `http://localhost:5173` (or the port shown 
 
 - LAB 1 : 8 Dec 2025 : Added Basic Project setup + Added frontend sections
 
-- LAB 2 : Added basic workflow in n8n and github api's to fetch PR data and diffs
+- LAB 2 : 15 Dec 2025 : Added basic workflow in n8n and github api's to fetch PR data and diffs
+
+- Lab 3 : 22 Dec 2025 : Added Github Official MCP and tried various function call with differnt LLM's 
 
 ![alt text](image.png)
