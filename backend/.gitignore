@@ -1,2 +1,7 @@
 .env
 ./.env
+ngrok.exe
+ngrok.zip
+__pycache__/
+*.pyc
+database.db
