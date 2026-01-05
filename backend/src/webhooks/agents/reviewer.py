@@ -1,48 +1,71 @@
-import os
 from core.llm import LLMService
 
 class ReviewerAgent:
     def __init__(self):
         self.llm = LLMService()
 
-    def _read_best_practices(self) -> str:
-        try:
-            with open("best_practices.md", "r") as f:
-                return f.read()
-        except FileNotFoundError:
-            return "No specific best practices provided."
+    def _compress_diff(self, raw_diff: str) -> str:
+        """
+        Compresses deleted blocks but ALWAYS preserves added lines (+).
+        """
+        lines = raw_diff.split('\n')
+        compressed_lines = []
+        deletion_count = 0
+        
+        for line in lines:
+            # Case 1: Deleted line
+            if line.startswith('-') and not line.startswith('---'):
+                deletion_count += 1
+                if deletion_count <= 5: # Keep first 5 deleted lines for context
+                    compressed_lines.append(line)
+                elif deletion_count == 6:
+                    compressed_lines.append(f"... [ {deletion_count} lines deleted ] ...")
+                # Skip the rest
+            
+            # Case 2: Added line or Context or Header
+            else:
+                # If we were deleting, update the marker (visual fix)
+                if deletion_count > 5:
+                    compressed_lines[-1] = f"... [ {deletion_count} lines deleted ] ..."
+                
+                deletion_count = 0
+                compressed_lines.append(line)
+        
+        # Join back together
+        return "\n".join(compressed_lines)
 
-    def run(self, raw_diff: str, pr_title: str) -> str:
-        # 1. Load Local Knowledge
-        best_practices = self._read_best_practices()
+    def run(self, raw_diff: str, pr_title: str, custom_instructions: str) -> str:
+        
+        # 1. Compress
+        clean_diff = self._compress_diff(raw_diff)
+        
+        # 2. Safety Truncate (Keep first 30k chars, but usually 'clean_diff' is small now)
+        final_diff = clean_diff[:30000]
 
-        # 2. Construct the Prompt (Matching n8n logic)
         prompt = f"""
         You are a Senior Code Reviewer.
         
-        CONTEXT:
-        We have a set of team guidelines that MUST be followed:
-        {best_practices}
-
-        YOUR MISSION:
-        - Review the code changes below file by file.
-        - Generate inline comments/feedback based on the Best Practices above.
-        - Ignore files without significant changes.
-        - Do not summarize what the code does, point out improvements or bugs.
-        - If the code violates a Best Practice, reference it explicitly.
+        INSTRUCTIONS FROM REPO OWNER:
+        {custom_instructions}
 
         PR TITLE: {pr_title}
 
         CODE DIFF:
         ```diff
-        {raw_diff[:25000]}  # Truncate to prevent token overflow
+        {final_diff}
         ```
 
-        OUTPUT FORMAT:
-        Provide a friendly but professional Markdown review.
+        OUTPUT RULES:
+        1. **Length**: Keep it MEDIUM sized. Be direct.
+        2. **Structure**:
+           - **🔍 Critics & Issues**: List specific problems.
+           - **💡 Recommendations**: Brief suggestions.
+           - **📝 Executive Summary**: Final verdict.
+        3. **Tone**: Follow the instructions style.
+
+        Review the code now.
         """
 
-        # 3. Call AI
         try:
             response = self.llm.client.chat.completions.create(
                 model=self.llm.model,
