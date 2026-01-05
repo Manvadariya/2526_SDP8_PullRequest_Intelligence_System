@@ -11,14 +11,12 @@ class LLMService:
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=config.OPENROUTER_API_KEY,
-            # FIX: Pass headers here inside the constructor
             default_headers={
-                "HTTP-Referer": "https://github.com/Manvadariya/ai-review-test",
+                "HTTP-Referer": "https://github.com/shubham-vaishnav-13/Test-Agent.git",
                 "X-Title": "PR Review Bot"
             }
         )
         
-        # OpenRouter requires the provider prefix (e.g., "openai/")
         self.model = config.MODEL
 
     def generate_summary(self, diff_text: str, title: str) -> dict:

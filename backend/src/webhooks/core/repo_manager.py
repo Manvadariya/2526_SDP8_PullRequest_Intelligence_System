@@ -42,8 +42,31 @@ class RepoManager:
     def cleanup(self):
         if os.path.exists(self.temp_dir):
             try:
-                # FIX: Use onerror to handle Windows read-only git files
+                print(f"🧹 Cleaning up {self.temp_dir}...")
+                
+                # On Windows, git files might be read-only; clear attributes first
+                for root, dirs, files in os.walk(self.temp_dir):
+                    for d in dirs:
+                        try:
+                            os.chmod(os.path.join(root, d), stat.S_IWRITE | stat.S_IREAD)
+                        except:
+                            pass
+                    for f in files:
+                        try:
+                            os.chmod(os.path.join(root, f), stat.S_IWRITE | stat.S_IREAD)
+                        except:
+                            pass
+                
+                # Now try to remove
                 shutil.rmtree(self.temp_dir, onerror=remove_readonly)
-                print(f"🧹 Cleaned up {self.temp_dir}")
+                print(f"✅ Cleaned up {self.temp_dir}")
             except Exception as e:
                 print(f"⚠️ Cleanup failed (non-critical): {e}")
+                # On Windows, some processes might still have locks; retry after a short delay
+                import time
+                time.sleep(0.1)
+                try:
+                    shutil.rmtree(self.temp_dir, onerror=remove_readonly)
+                    print(f"✅ Cleaned up {self.temp_dir} (after retry)")
+                except Exception as e2:
+                    print(f"⚠️ Second cleanup attempt failed: {e2}")

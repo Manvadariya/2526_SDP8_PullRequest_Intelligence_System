@@ -57,5 +57,12 @@ async def receive_webhook(
     return {"status": "job accepted", "job_id": new_job.id}
 
 if __name__ == "__main__":
+    import asyncio
+    import sys
+    # On Windows the default ProactorEventLoop doesn't handle signals the
+    # same way; switching to the SelectorEventLoopPolicy ensures KeyboardInterrupt
+    # (Ctrl+C) is properly received and processed by Uvicorn.
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

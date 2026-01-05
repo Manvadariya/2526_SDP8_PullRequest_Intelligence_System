@@ -66,8 +66,11 @@ class Orchestrator:
                     status_state = "success"
                     status_desc = "Checks Passed"
                     
-                    # Fail status check if security issues found
-                    if sec_results.get("details"):
+                    # Fail status check if security issues found (handle both error and details cases)
+                    if sec_results.get("error"):
+                        status_state = "failure"
+                        status_desc = "Security Scan Failed"
+                    elif sec_results.get("details"):
                         status_state = "failure"
                         status_desc = "Security Issues Found"
 
@@ -87,5 +90,17 @@ class Orchestrator:
 
             except Exception as e:
                 print(f"❌ Job {job_id}: Failed - {e}")
+                import traceback
+                traceback.print_exc()  # Print full traceback for debugging
+                
+                try:
+                    job = await session.get(Job, job_id)
+                    if job:
+                        job.status = "failed"
+                        session.add(job)
+                        await session.commit()
+                except:
+                    pass
+                
                 await session.rollback()
                 await self.gh.set_commit_status(metadata.repo_full_name, metadata.commit_sha, "failure", "Error")
