@@ -4,6 +4,7 @@ from config import config
 
 # This hidden signature allows us to find our own comments
 BOT_SIGNATURE = ""
+FILE_SIGNATURE_PREFIX = "<!-- SapientPR-File:"  # For file-specific comments
 
 class GitHubClient:
     def __init__(self):
@@ -60,6 +61,32 @@ class GitHubClient:
         url = f"https://api.github.com/repos/{repo}/issues/comments/{comment_id}"
         async with httpx.AsyncClient() as client:
             await client.patch(url, json={"body": body}, headers=self.headers)
+
+    # --- NEW: Post multiple file-specific comments ---
+    async def post_file_reviews(self, repo: str, pr_number: int, file_reviews: dict):
+        """
+        Posts separate comments for each file.
+        file_reviews = {
+            "src/app.py": "review content...",
+            "src/utils.py": "review content..."
+        }
+        """
+        if len(file_reviews) > 8:
+            # If more than 8 files, combine into one comment
+            combined_body = "## 📦 Combined Review (Multiple Files)\n\n"
+            for filepath, review in file_reviews.items():
+                combined_body += f"### 📄 `{filepath}`\n\n{review}\n\n---\n\n"
+            
+            # Always create new comment (never update)
+            await self._post_comment(repo, pr_number, combined_body + "\n" + BOT_SIGNATURE)
+        else:
+            # Post separate comment for each file (always new)
+            for filepath, review in file_reviews.items():
+                file_signature = f"{FILE_SIGNATURE_PREFIX} {filepath} -->"
+                signed_body = f"## 📄 Review for `{filepath}`\n\n{review}\n\n{file_signature}"
+                
+                print(f"📝 Creating new comment for {filepath}...")
+                await self._post_comment(repo, pr_number, signed_body)
 
     # --- Standard Utils (Unchanged) ---
     async def add_label(self, repo: str, pr_number: int, label: str):
