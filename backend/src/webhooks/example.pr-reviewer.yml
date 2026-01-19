@@ -1,0 +1,42 @@
+# .pr-reviewer.yml - Place this in your repository root
+
+# Enable/disable the AI reviewer
+enable_review: true
+
+# Minimum severity to report: low, medium, high, critical
+severity_threshold: low
+
+# Custom instructions for the AI reviewer
+custom_instructions: |
+  Focus on:
+  - Security vulnerabilities
+  - Performance bottlenecks
+  - Code readability
+  Be concise but thorough.
+
+# Custom checks to apply (in addition to defaults)
+custom_checks:
+  - "All database queries must use parameterized statements"
+  - "API endpoints must have rate limiting"
+  - "Sensitive data must be encrypted at rest"
+  - "No console.log or print statements in production code"
+  - "All async functions must have error handling"
+
+# Language-specific rules
+language_rules:
+  python:
+    - "Use type hints for function parameters"
+    - "Follow PEP 8 style guide"
+  javascript:
+    - "Use const/let instead of var"
+    - "Prefer async/await over .then() chains"
+  java:
+    - "Follow Google Java Style Guide"
+    - "Use Optional instead of null checks"
+
+# Files/patterns to ignore
+ignore_patterns:
+  - "*.test.js"
+  - "*.spec.ts"
+  - "migrations/*"
+  - "vendor/*"
