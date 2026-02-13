@@ -115,13 +115,15 @@ class DiffParser:
                 if match:
                     new_line = int(match.group(1))
                 annotated.append(line)
-            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index '):
+            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index ') or line.startswith('\\'):
                 annotated.append(line)
             elif line.startswith('+'):
                 annotated.append(f"L{new_line:>4} {line}")
                 new_line += 1
             elif line.startswith('-'):
-                annotated.append(f"      {line}")  # No new-side line number for deletions
+                annotated.append(f"      {line}")
+            elif not line.strip(): # Ignore empty lines (often from split)
+                annotated.append(line)
             else:
                 # Context line
                 if new_line > 0:
@@ -147,13 +149,15 @@ class DiffParser:
                 match = re.search(r'\+(\d+)', line)
                 if match:
                     new_line = int(match.group(1))
-            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index '):
+            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index ') or line.startswith('\\'):
                 continue
             elif line.startswith('+'):
                 valid.add(new_line)
                 new_line += 1
             elif line.startswith('-'):
-                pass  # Deletions don't consume new-side line numbers
+                pass
+            elif not line.strip(): # Ignore empty context lines (usually split artifact)
+                continue 
             else:
                 if new_line > 0:
                     valid.add(new_line)
