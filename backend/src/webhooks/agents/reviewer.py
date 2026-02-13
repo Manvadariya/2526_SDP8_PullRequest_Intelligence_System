@@ -313,6 +313,135 @@ Return a JSON object. Each key is a filepath, value is the review:
             # Fallback: return error for each file
             return {fp: f"⚠️ AI Review Failed: {str(e)[:100]}" for fp in file_diffs.keys()}
 
+    def run_inline_review(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None) -> dict:
+        """
+        Generates CONCISE inline review data for GitHub PR review comments (Coderabbit-style).
+        
+        Only flags real issues (bugs, security, performance, logic errors).
+        Files with no issues are marked as "clean" and grouped in a summary.
+        
+        Returns: {
+            "summary": "Overall PR assessment",
+            "clean_files": ["file1.py", "file2.py"],
+            "inline_comments": [
+                {"path": "file.py", "line": 14, "severity": "critical", "message": "...", "suggestion": "fixed code"},
+            ],
+            "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+        }
+        """
+        file_diffs = self.diff_parser.parse_diff(raw_diff)
+        if not file_diffs:
+            return {"summary": "No files changed.", "clean_files": [], "inline_comments": [], "verdict": "APPROVE"}
+
+        # Build annotated diffs with line numbers so LLM can reference exact lines
+        files_section = ""
+        for filepath, diff_content in file_diffs.items():
+            annotated = DiffParser.annotate_diff_with_line_numbers(diff_content)
+            if len(annotated) > 6000:
+                annotated = annotated[:6000] + "\n... [truncated]"
+            files_section += f"\n### FILE: `{filepath}`\n```diff\n{annotated}\n```\n"
+
+        custom_checks_text = ""
+        if custom_checks:
+            custom_checks_text = "\n**Custom checks:** " + "; ".join(str(c) for c in custom_checks)
+
+        prompt = f"""You are a senior code reviewer. Review this PR diff and provide CONCISE, actionable feedback.
+
+**PR Title:** {pr_title}
+**Instructions:** {custom_instructions}
+{custom_checks_text}
+
+## Changed Files (line numbers shown as Lxx on the new/right side)
+{files_section}
+
+## RULES
+1. ONLY flag REAL issues: bugs, security vulnerabilities, performance problems, logic errors, or missing error handling
+2. Do NOT comment on style, formatting, naming conventions, or minor nitpicks
+3. If a file looks fine, mark it as "clean" — do NOT invent issues
+4. Use the exact line numbers shown (Lxx) for any issues you find
+5. For each issue, if you have a concrete fix, provide the EXACT single-line replacement code
+6. Keep messages SHORT — one clear sentence explaining the problem
+7. Be constructive: explain WHY it's a problem and HOW to fix it
+
+## Output Format (STRICT JSON, nothing else)
+{{
+  "summary": "1-2 sentence overall PR assessment",
+  "files": {{
+    "path/to/file.ext": {{
+      "status": "clean",
+      "comments": []
+    }},
+    "path/to/other.ext": {{
+      "status": "issues",
+      "comments": [
+        {{
+          "line": 14,
+          "severity": "critical",
+          "message": "Short clear explanation of the bug/issue",
+          "suggestion": "exact replacement code for that line (optional)"
+        }}
+      ]
+    }}
+  }},
+  "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+}}
+
+Severity guide:
+- "critical": Bugs, crashes, security vulnerabilities, data loss — MUST fix before merge
+- "warning": Performance issues, missing validation, potential edge cases — SHOULD fix
+- "info": Minor improvements, better patterns — NICE to fix
+
+Return ONLY valid JSON. No markdown code blocks. No extra text."""
+
+        try:
+            response = self.llm.client.chat.completions.create(
+                model=self.llm.model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            ai_response = response.choices[0].message.content.strip()
+            result = self._extract_and_parse_json(ai_response)
+
+            # Process into our standard format
+            clean_files = []
+            inline_comments = []
+
+            files_data = result.get("files", {})
+            for filepath, file_data in files_data.items():
+                if isinstance(file_data, dict) and file_data.get("status") == "clean":
+                    clean_files.append(filepath)
+                elif isinstance(file_data, dict):
+                    for comment in file_data.get("comments", []):
+                        if isinstance(comment, dict) and comment.get("message"):
+                            inline_comments.append({
+                                "path": filepath,
+                                "line": comment.get("line", 1),
+                                "severity": comment.get("severity", "info"),
+                                "message": comment.get("message", ""),
+                                "suggestion": comment.get("suggestion")
+                            })
+                    # If file has "issues" status but no comments, mark as clean
+                    if not file_data.get("comments"):
+                        clean_files.append(filepath)
+
+            return {
+                "summary": result.get("summary", "Review complete."),
+                "clean_files": clean_files,
+                "inline_comments": inline_comments,
+                "verdict": result.get("verdict", "COMMENT")
+            }
+
+        except Exception as e:
+            print(f"❌ Inline review failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "summary": f"Review failed: {str(e)[:100]}",
+                "clean_files": list(file_diffs.keys()),
+                "inline_comments": [],
+                "verdict": "COMMENT"
+            }
+
     def _format_review(self, filepath: str, review_data: dict) -> str:
         """Format a single file's review data into professional markdown with dropdowns."""
         try:

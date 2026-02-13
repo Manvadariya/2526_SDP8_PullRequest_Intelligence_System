@@ -98,3 +98,65 @@ class DiffParser:
                 formatted_lines.extend(deletion_buffer)
         
         return '\n'.join(formatted_lines)
+
+    @staticmethod
+    def annotate_diff_with_line_numbers(file_diff: str) -> str:
+        """
+        Annotates a single file's diff with new-side line numbers (Lxx).
+        This helps the LLM reference exact line numbers for inline comments.
+        """
+        lines = file_diff.split('\n')
+        annotated = []
+        new_line = 0
+
+        for line in lines:
+            if line.startswith('@@'):
+                match = re.search(r'\+(\d+)', line)
+                if match:
+                    new_line = int(match.group(1))
+                annotated.append(line)
+            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index '):
+                annotated.append(line)
+            elif line.startswith('+'):
+                annotated.append(f"L{new_line:>4} {line}")
+                new_line += 1
+            elif line.startswith('-'):
+                annotated.append(f"      {line}")  # No new-side line number for deletions
+            else:
+                # Context line
+                if new_line > 0:
+                    annotated.append(f"L{new_line:>4} {line}")
+                    new_line += 1
+                else:
+                    annotated.append(line)
+
+        return '\n'.join(annotated)
+
+    @staticmethod
+    def get_valid_right_lines(file_diff: str) -> set:
+        """
+        Returns all line numbers visible on the RIGHT side of the diff.
+        These are the only valid positions for inline review comments.
+        """
+        lines = file_diff.split('\n')
+        valid = set()
+        new_line = 0
+
+        for line in lines:
+            if line.startswith('@@'):
+                match = re.search(r'\+(\d+)', line)
+                if match:
+                    new_line = int(match.group(1))
+            elif line.startswith('+++') or line.startswith('---') or line.startswith('diff --git') or line.startswith('index '):
+                continue
+            elif line.startswith('+'):
+                valid.add(new_line)
+                new_line += 1
+            elif line.startswith('-'):
+                pass  # Deletions don't consume new-side line numbers
+            else:
+                if new_line > 0:
+                    valid.add(new_line)
+                    new_line += 1
+
+        return valid

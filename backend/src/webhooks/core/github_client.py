@@ -88,6 +88,41 @@ class GitHubClient:
                 print(f"📝 Creating new comment for {filepath}...")
                 await self._post_comment(repo, pr_number, signed_body)
 
+    # --- NEW: Inline Review Comments (Coderabbit-style) ---
+    async def post_inline_review(self, repo: str, pr_number: int, commit_sha: str,
+                                  inline_comments: list, summary_body: str = "",
+                                  event: str = "COMMENT"):
+        """
+        Posts a PR review with inline comments on specific diff lines.
+        Uses: POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+        
+        inline_comments: [{"path": "file.py", "line": 14, "side": "RIGHT", "body": "..."}]
+        event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE"
+        """
+        url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
+
+        payload = {
+            "commit_id": commit_sha,
+            "event": event,
+            "comments": inline_comments
+        }
+        if summary_body:
+            payload["body"] = summary_body + f"\n\n{BOT_SIGNATURE}"
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, json=payload, headers=self.headers)
+            if resp.status_code in (200, 201):
+                print(f"✅ Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
+                return True
+            else:
+                print(f"❌ Inline review failed ({resp.status_code}): {resp.text[:500]}")
+                # Fallback: post as regular issue comment
+                fallback = summary_body + "\n\n" if summary_body else ""
+                for c in inline_comments:
+                    fallback += f"📍 **{c['path']}** (Line {c['line']})\n{c['body']}\n\n---\n\n"
+                await self.post_or_update_comment(repo, pr_number, fallback)
+                return False
+
     # --- Standard Utils (Unchanged) ---
     async def add_label(self, repo: str, pr_number: int, label: str):
         url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/labels"

@@ -46,19 +46,25 @@ AgenticPR automates code review workflows by leveraging AI agents to analyze PRs
 
 ### Lab 3 - December 22, 2025
 -  GitHub Official MCP implementation
--  Multi-LLM provider support (OpenAI, OpenRouter)
--  Enhanced analysis agents (security, linter, reviewer)
+-  Multi-LLM provider support 
+-  Enhanced analysis agents 
 -  Dashboard improvements
 
 ### Lab 4 - January 5, 2026
 - Update LLMService and Orchestrator for improved error handling and cleanup processes.
 
 
-### LAB 5
+### LAB 5 - January 12, 2026
 - Added Better PR Summarization with better formatting and context.
 - Improved Issue Detection with more comprehensive checks and balances.
 
+### LAB 6 - January 19, 2026
+- Enhance ReviewerAgent with robust JSON prompt 
+- Added multi-file review capabilities
 
+
+### LAB 7 - February 13, 2026
+- Implemented Inline Commenting System for more contextual feedback
 ---
 
 
