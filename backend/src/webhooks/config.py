@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -22,5 +22,11 @@ class Config:
     ENABLE_DOCKER_CHECKS = os.getenv("ENABLE_DOCKER_CHECKS", "False").lower() == "true"
     DOCKER_IMAGE = os.getenv("DOCKER_CHECK_IMAGE", "pr-checks:latest")
     DOCKER_TIMEOUT = int(os.getenv("DOCKER_TIMEOUT", "300"))
+    
+    # Persistent Docker Service
+    DOCKER_EXECUTABLE_PATH = os.getenv("DOCKER_EXECUTABLE_PATH", "docker")
+    DOCKER_CONTAINER_NAME = "sapient-pr-checks-worker"
+    # Shared workspace on host (e.g. D:\project\sdp\...\backend\src\webhooks\ai_review_workspace)
+    WORKSPACE_MOUNT_PATH = os.path.join(os.getcwd(), "ai_review_workspace")
 
 config = Config()

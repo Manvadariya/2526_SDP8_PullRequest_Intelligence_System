@@ -6,6 +6,110 @@ class ReviewerAgent:
         self.llm = LLMService()
         self.diff_parser = DiffParser()
 
+    def _fix_malformed_json(self, text: str) -> str:
+        """
+        Aggressively fix malformed JSON by handling common issues.
+        """
+        # First pass: escape unescaped quotes and newlines inside string values
+        result = []
+        in_string = False
+        escape_next = False
+        
+        for i, char in enumerate(text):
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                result.append(char)
+                escape_next = True
+                continue
+            
+            if char == '"' and (i == 0 or text[i-1] != '\\'):
+                in_string = not in_string
+                result.append(char)
+            elif in_string and char == '\n':
+                # Replace literal newline with escaped newline
+                result.append('\\n')
+            elif in_string and char == '\r':
+                result.append('\\r')
+            elif in_string and char == '\t':
+                result.append('\\t')
+            else:
+                result.append(char)
+        
+        return ''.join(result)
+    
+    def _extract_and_parse_json(self, response: str) -> dict:
+        """
+        Extract JSON from response with multiple fallback strategies.
+        """
+        import json
+        response = response.strip()
+        
+        # Strategy 1: Try direct parse
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            pass
+        
+        # Strategy 2: Remove markdown code blocks
+        if "```json" in response:
+            response = response.split("```json")[1].split("```")[0].strip()
+            try:
+                return json.loads(response)
+            except json.JSONDecodeError:
+                pass
+        
+        if "```" in response:
+            parts = response.split("```")
+            for part in parts:
+                if part.strip().startswith('{'):
+                    try:
+                        return json.loads(part.strip())
+                    except json.JSONDecodeError:
+                        pass
+        
+        # Strategy 3: Find JSON object by braces
+        if '{' in response:
+            start_idx = response.find('{')
+            brace_count = 0
+            end_idx = -1
+            
+            for i in range(start_idx, len(response)):
+                if response[i] == '{':
+                    brace_count += 1
+                elif response[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if end_idx > start_idx:
+                potential_json = response[start_idx:end_idx]
+                
+                # Try direct parse
+                try:
+                    return json.loads(potential_json)
+                except json.JSONDecodeError:
+                    pass
+                
+                # Try fixing the JSON
+                try:
+                    fixed = self._fix_malformed_json(potential_json)
+                    return json.loads(fixed)
+                except json.JSONDecodeError as e:
+                    # Last resort: try to truncate at the error point
+                    print(f"⚠️ Attempting JSON recovery at position {e.pos}")
+                    try:
+                        return json.loads(potential_json[:e.pos] + '}' * brace_count)
+                    except:
+                        pass
+        
+        # If all parsing fails, return empty dict with error
+        raise ValueError("Could not extract valid JSON from response")
+
     def _compress_diff(self, raw_diff: str) -> str:
         """
         Compresses deleted blocks but ALWAYS preserves added lines (+).

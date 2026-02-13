@@ -111,17 +111,32 @@ class GitHubClient:
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, json=payload, headers=self.headers)
+            
+            # 1. Success Case
             if resp.status_code in (200, 201):
                 print(f"✅ Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
                 return True
-            else:
-                print(f"❌ Inline review failed ({resp.status_code}): {resp.text[:500]}")
-                # Fallback: post as regular issue comment
-                fallback = summary_body + "\n\n" if summary_body else ""
+            
+            # 2. Specific Error: Self-Review Restriction
+            if resp.status_code == 422 and "request changes on your own pull request" in resp.text:
+                print(f"⚠️ Cannot request changes on own PR. Retrying with COMMENT event...")
+                payload["event"] = "COMMENT"
+                resp = await client.post(url, json=payload, headers=self.headers)
+                if resp.status_code in (200, 201):
+                    print(f"✅ Retry success: Posted as COMMENT.")
+                    return True
+            
+            # 3. Failure Case
+            print(f"❌ Inline review failed ({resp.status_code}): {resp.text[:500]}")
+            # Fallback: post as regular issue comment
+            fallback = summary_body + "\n\n" if summary_body else ""
+            if inline_comments:
+                fallback += "### ⚠️ Inline Comments (Fallback)\n"
                 for c in inline_comments:
-                    fallback += f"📍 **{c['path']}** (Line {c['line']})\n{c['body']}\n\n---\n\n"
-                await self.post_or_update_comment(repo, pr_number, fallback)
-                return False
+                    fallback += f"- **{c['path']}** (Line {c['line']}): {c['body']}\n"
+            
+            await self.post_or_update_comment(repo, pr_number, fallback)
+            return False
 
     # --- Standard Utils (Unchanged) ---
     async def add_label(self, repo: str, pr_number: int, label: str):

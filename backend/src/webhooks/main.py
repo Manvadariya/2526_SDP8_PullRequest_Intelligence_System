@@ -119,7 +119,7 @@ if __name__ == "__main__":
     # Auto-clear the port before starting
     if sys.platform.startswith("win"):
         kill_port(PORT)
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     import uvicorn
     print(f"\n🚀 Starting PR Review Bot on http://0.0.0.0:{PORT}")

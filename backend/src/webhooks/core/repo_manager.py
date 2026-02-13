@@ -4,6 +4,8 @@ import tempfile
 import subprocess
 import stat
 
+from config import config
+
 # Helper to force delete read-only files on Windows
 def remove_readonly(func, path, exc_info):
     # Clear the read-only bit and retry
@@ -15,7 +17,13 @@ class RepoManager:
         # Embed token for auth
         self.repo_url = repo_url.replace("https://", f"https://x-access-token:{token}@")
         self.commit_sha = commit_sha
-        self.temp_dir = tempfile.mkdtemp(prefix="ai-review-")
+        
+        # Ensure shared workspace exists
+        if not os.path.exists(config.WORKSPACE_MOUNT_PATH):
+            os.makedirs(config.WORKSPACE_MOUNT_PATH, exist_ok=True)
+            
+        # Create temp dir INSIDE the shared workspace
+        self.temp_dir = tempfile.mkdtemp(prefix="repo-", dir=config.WORKSPACE_MOUNT_PATH)
 
     def clone_and_checkout(self):
         try:
