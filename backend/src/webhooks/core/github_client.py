@@ -3,7 +3,7 @@ import base64
 from config import config
 
 # This hidden signature allows us to find our own comments
-BOT_SIGNATURE = ""
+BOT_SIGNATURE = "<!-- SapientPR-Review AXIOM_ULTRA -->"
 FILE_SIGNATURE_PREFIX = "<!-- SapientPR-File:"  # For file-specific comments
 
 class GitHubClient:

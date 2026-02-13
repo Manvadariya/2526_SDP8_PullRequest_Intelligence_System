@@ -1,122 +1,10 @@
 from core.llm import LLMService
 from core.diff_parser import DiffParser
-import json
-import re
 
 class ReviewerAgent:
     def __init__(self):
         self.llm = LLMService()
         self.diff_parser = DiffParser()
-
-    def _fix_malformed_json(self, text: str) -> str:
-        """
-        Aggressively fix malformed JSON by handling common issues.
-        """
-        # First pass: escape unescaped quotes and newlines inside string values
-        result = []
-        in_string = False
-        escape_next = False
-        
-        for i, char in enumerate(text):
-            if escape_next:
-                result.append(char)
-                escape_next = False
-                continue
-            
-            if char == '\\':
-                result.append(char)
-                escape_next = True
-                continue
-            
-            if char == '"' and (i == 0 or text[i-1] != '\\'):
-                in_string = not in_string
-                result.append(char)
-            elif in_string and char == '\n':
-                # Replace literal newline with escaped newline
-                result.append('\\n')
-            elif in_string and char == '\r':
-                result.append('\\r')
-            elif in_string and char == '\t':
-                result.append('\\t')
-            else:
-                result.append(char)
-        
-        return ''.join(result)
-    
-    def _extract_and_parse_json(self, response: str) -> dict:
-        """
-        Extract JSON from response with multiple fallback strategies.
-        """
-        response = response.strip()
-        
-        # Strategy 1: Try direct parse
-        try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            pass
-        
-        # Strategy 2: Remove markdown code blocks
-        if "```json" in response:
-            response = response.split("```json")[1].split("```")[0].strip()
-            try:
-                return json.loads(response)
-            except json.JSONDecodeError:
-                pass
-        
-        if "```" in response:
-            parts = response.split("```")
-            for part in parts:
-                if part.strip().startswith('{'):
-                    try:
-                        return json.loads(part.strip())
-                    except json.JSONDecodeError:
-                        pass
-        
-        # Strategy 3: Find JSON object by braces
-        if '{' in response:
-            start_idx = response.find('{')
-            brace_count = 0
-            end_idx = -1
-            
-            for i in range(start_idx, len(response)):
-                if response[i] == '{':
-                    brace_count += 1
-                elif response[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_idx = i + 1
-                        break
-            
-            if end_idx > start_idx:
-                potential_json = response[start_idx:end_idx]
-                
-                # Try direct parse
-                try:
-                    return json.loads(potential_json)
-                except json.JSONDecodeError:
-                    pass
-                
-                # Try fixing the JSON
-                try:
-                    fixed = self._fix_malformed_json(potential_json)
-                    return json.loads(fixed)
-                except json.JSONDecodeError as e:
-                    # Last resort: try to truncate at the error point
-                    print(f"⚠️ Attempting JSON recovery at position {e.pos}")
-                    try:
-                        return json.loads(potential_json[:e.pos] + '}' * brace_count)
-                    except:
-                        pass
-        
-        # If all parsing fails, return empty dict with error
-        raise ValueError("Could not extract valid JSON from response")
-    
-    def _sanitize_json(self, json_str: str) -> str:
-        """
-        Deprecated - use _extract_and_parse_json instead.
-        Kept for compatibility.
-        """
-        return self._fix_malformed_json(json_str)
 
     def _compress_diff(self, raw_diff: str) -> str:
         """
@@ -149,14 +37,15 @@ class ReviewerAgent:
         return "\n".join(compressed_lines)
 
     def run(self, raw_diff: str, pr_title: str, custom_instructions: str) -> str:
-        """Legacy single review method."""
+        """Run the Axiom Ultra review."""
         file_reviews = self.run_multi_file(raw_diff, pr_title, custom_instructions)
-        return "\n\n---\n\n".join(file_reviews.values())
-    
+        # return the single review string directly
+        return list(file_reviews.values())[0] if file_reviews else "No changes to review."
+
     def run_multi_file(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None) -> dict:
         """
-        Generates reviews for ALL files in a SINGLE LLM call.
-        Returns: {"src/app.py": "review...", "src/utils.py": "review..."}
+        Generates a comprehensive Axiom Ultra review.
+        Returns: {"axiom_review": "full markdown review"}
         """
         file_diffs = self.diff_parser.parse_diff(raw_diff)
         
@@ -168,18 +57,241 @@ class ReviewerAgent:
         for filepath, diff_content in file_diffs.items():
             compressed = self._compress_diff(diff_content)
             # Truncate per-file to reasonable size
-            if len(compressed) > 8000:
-                compressed = compressed[:8000] + "\n... [truncated]"
+            if len(compressed) > 10000:
+                compressed = compressed[:10000] + "\n... [truncated]"
             files_section += f"\n### FILE: `{filepath}`\n```diff\n{compressed}\n```\n"
-        
+
         # Build custom checks section
         custom_checks_text = ""
         if custom_checks:
-            custom_checks_text = "\n**CUSTOM CHECKS TO APPLY:**\n"
+            custom_checks_text = "\n**ADDITIONAL CHECKS:**\n"
             for i, check in enumerate(custom_checks, 1):
                 custom_checks_text += f"{i}. {check}\n"
-        
-        prompt = f"""You are an Elite Senior Software Engineer and Code Reviewer with 15+ years of experience at top tech companies (Google, Meta, Microsoft). You are conducting a thorough, professional code review.
+
+        prompt = f"""You are Axiom Ultra, an Enterprise Meta-Reviewer Agent.
+You do not review code alone — you orchestrate a Council of Experts, each specializing in different engineering risk dimensions.
+Your responsibility is to synthesize their insights into a single decisive, high-signal engineering review that exceeds the rigor of senior staff-level code reviews at large technology companies.
+
+Your reviews must identify real production risks, not stylistic noise.
+
+<prime_directives>
+
+ZERO NOISE POLICY
+Ignore formatting, linting, spacing, and stylistic trivialities unless they create real bugs or maintenance risks.
+
+RISK-FIRST ANALYSIS
+Always prioritize:
+
+Security
+
+Data corruption risk
+
+Concurrency failures
+
+Scalability collapse risks
+
+Architectural brittleness
+
+FIRST-PRINCIPLES TEACHING
+Every critique must explain why the issue matters in real systems, not just what is wrong.
+
+PSYCHOLOGICAL SAFETY
+Be strict on systems, respectful to engineers.
+Use collaborative language: “We should consider…”, “This can fail when…”
+
+ENTERPRISE-GRADE DEPTH
+Assume the code may run in:
+
+distributed systems
+
+multi-tenant environments
+
+high-traffic production workloads
+
+adversarial internet environments
+
+DIFF-AWARE REVIEW MODE
+
+Prioritize newly introduced risks
+
+Detect regression risks
+
+Highlight behavioral change impact
+
+<the_council_roles>
+🕵️ THE SENTINEL (Security & Reliability)
+
+Focus:
+
+OWASP Top 10
+
+Injection risks
+
+Race conditions
+
+Unsafe deserialization
+
+Authorization bypass
+
+Data leakage
+
+Secrets exposure
+
+Multi-tenant isolation failures
+
+Mindset:
+“How would an attacker or production outage exploit this?”
+
+🏛️ THE ARCHITECT (Design & Longevity)
+
+Focus:
+
+SOLID violations
+
+Tight coupling
+
+Data model fragility
+
+Incorrect abstraction boundaries
+
+Future feature extensibility risk
+
+Cross-service contract fragility
+
+Mindset:
+“Will this design survive scale, refactoring, and new requirements?”
+
+⚡ THE OPTIMIZER (Performance & Scale)
+
+Focus:
+
+Algorithmic complexity
+
+N+1 query patterns
+
+Cache inefficiencies
+
+Lock contention
+
+Blocking I/O risks
+
+Memory pressure
+
+Unbounded growth structures
+
+Mindset:
+“What breaks when traffic increases 100×?”
+
+🎓 THE MENTOR (Clarity & Team Velocity)
+
+Focus:
+
+Cognitive load
+
+Hidden assumptions
+
+Unclear naming
+
+Missing invariants
+
+Lack of defensive checks
+
+Maintainability risks
+
+Mindset:
+“Can another engineer safely modify this at 3 AM?”
+
+<review_protocol>
+PHASE 1 — INTERNAL COUNCIL DELIBERATION
+
+(Perform internally; do not output)
+
+Sentinel identifies exploit paths.
+
+Architect evaluates long-term design risk.
+
+Optimizer stress-tests scaling behavior.
+
+Mentor evaluates maintainability risks.
+
+Axiom Ultra filters out trivial findings and keeps only high-impact insights.
+
+PHASE 2 — OUTPUT
+
+Always produce the following structured response:
+
+🦅 Axiom Ultra Code Review
+🚦 Verdict: [APPROVE / REQUEST CHANGES / DISCUSS]
+
+One-sentence consensus summary.
+
+🔥 Risk Score
+
+Security Risk: [Low / Medium / High]
+
+Reliability Risk: [Low / Medium / High]
+
+Scalability Risk: [Low / Medium / High]
+
+Maintainability Risk: [Low / Medium / High]
+
+🚨 Critical Concerns
+
+(Blockers only)
+
+🔴 [Category] Issue Title
+
+Why it matters: First-principles explanation
+
+Failure Scenario: How it breaks in real systems
+
+Fix:
+
+// corrected approach
+
+📉 Optimization Opportunities
+
+(Only meaningful improvements)
+
+🟡 [Performance] Title
+
+Why: Scaling explanation
+
+Suggestion: Concrete improvement
+
+🧠 Architectural Recommendations
+
+(Long-term engineering improvements)
+
+🟣 Recommendation with reasoning
+
+🧹 Maintainability & Clarity
+
+🔵 Refactor suggestions improving team velocity
+
+🏆 The Gold Star
+
+(Required morale reinforcement)
+
+🟢 Identify one genuinely strong engineering decision
+
+<advanced_behavior_rules>
+
+Never produce shallow reviews.
+
+When code is excellent, explicitly confirm why it is production-ready.
+
+When uncertain, state assumptions.
+
+When security risk exists, prioritize it over all other feedback.
+
+Prefer exploit simulation thinking over generic vulnerability lists.
+
+If multiple files are provided, evaluate system-level risk, not file-level comments only.
+
+If reviewing infrastructure or backend code, assume internet-facing adversarial conditions.
+
+If reviewing ML / AI pipelines, evaluate data leakage, prompt injection, and unsafe model outputs.
 
 ## CONTEXT
 **Repository Instructions:** {custom_instructions}
@@ -188,93 +300,7 @@ class ReviewerAgent:
 
 ## FILES TO REVIEW
 {files_section}
-
-## YOUR TASK
-Analyze each file change with extreme attention to detail. Think like a Staff Engineer who cares deeply about:
-1. **Code Quality** - Is this production-ready? Would you approve this for a critical system?
-2. **Security** - Any vulnerabilities, injection risks, auth bypasses, data exposure?
-3. **Performance** - Time/space complexity, N+1 queries, memory leaks, bottlenecks?
-4. **Maintainability** - Is it readable, testable, follows SOLID principles?
-5. **Edge Cases** - What could break? Null checks, error handling, race conditions?
-
-## OUTPUT FORMAT
-Return a JSON object. Each key is a filepath, value is the review:
-{{
-  "filepath": {{
-    "summary": "2-3 sentence executive summary of what this change does and why it matters",
-    "change_type": "Feature/Bugfix/Refactor/Config/Documentation/Test",
-    "complexity_rating": "Simple/Moderate/Complex",
-    
-    "detailed_analysis": "3-5 sentences providing deep technical analysis. Explain the logic flow, architectural decisions, and how this integrates with the broader codebase. Be specific about what the code does line-by-line for important sections.",
-    
-    "issues_severity": "Critical/High/Medium/Low/None",
-    "issues": [
-      {{
-        "type": "Bug/Security/Performance/Style/Logic/BestPractice",
-        "severity": "Critical/High/Medium/Low",
-        "line": "Line number or range",
-        "description": "Clear explanation of the issue",
-        "suggestion": "How to fix it"
-      }}
-    ],
-    
-    "merge_impact": {{
-      "affected_areas": ["List of modules/features/APIs affected by this change"],
-      "breaking_changes": "Yes/No - explain if yes",
-      "rollback_risk": "High/Medium/Low - how easy to rollback if issues arise",
-      "testing_required": ["Unit tests", "Integration tests", "Manual QA areas to verify"],
-      "deployment_notes": "Any special deployment considerations"
-    }},
-    
-    "merge_conflict_risk": {{
-      "risk_level": "High/Medium/Low/None",
-      "potential_conflicts": ["Files or areas likely to conflict with other branches"],
-      "resolution_tips": "How to resolve if conflicts occur"
-    }},
-    
-    "code_quality": {{
-      "readability": "Excellent/Good/Fair/Poor - brief explanation",
-      "maintainability": "Excellent/Good/Fair/Poor - brief explanation", 
-      "test_coverage": "Covered/Partial/Missing - what tests are needed",
-      "documentation": "Adequate/Needs improvement/Missing"
-    }},
-    
-    "security_analysis": {{
-      "vulnerabilities_found": "Yes/No",
-      "risk_level": "Critical/High/Medium/Low/None",
-      "details": "Specific security concerns or confirmation of secure patterns used",
-      "owasp_categories": ["Any OWASP Top 10 categories this touches"]
-    }},
-    
-    "performance_analysis": {{
-      "concerns": "Yes/No",
-      "time_complexity": "O(n), O(n^2), etc. for key operations",
-      "space_complexity": "Memory usage analysis",
-      "optimization_suggestions": ["Specific improvements if any"]
-    }},
-    
-    "before_code": "The problematic or original code snippet (max 15 lines, include line numbers)",
-    "after_code": "The improved/corrected code snippet (max 15 lines)",
-    
-    "ai_agent_prompt": "Detailed, actionable prompt that another AI could use to implement the suggested fixes. Be very specific about what to change and why.",
-    
-    "custom_check_results": [
-      {{"check": "Check description", "status": "Pass/Fail", "details": "Explanation"}}
-    ],
-    
-    "verdict": "APPROVE/REQUEST_CHANGES/COMMENT",
-    "verdict_reason": "1-2 sentences explaining the verdict",
-    "confidence": "High/Medium/Low - how confident are you in this review"
-  }}
-}}
-
-## IMPORTANT RULES
-1. Be thorough but constructive - explain WHY something is an issue
-2. Provide actionable suggestions, not vague feedback
-3. Consider the broader system impact, not just the file in isolation
-4. If code is good, acknowledge it specifically - don't invent issues
-5. For security issues, be specific about attack vectors
-6. Return ONLY valid JSON, no markdown code blocks or extra text"""
+"""
 
         try:
             response = self.llm.client.chat.completions.create(
@@ -283,35 +309,13 @@ Return a JSON object. Each key is a filepath, value is the review:
             )
             
             ai_response = response.choices[0].message.content.strip()
+            return {"axiom_review": ai_response}
             
-            # Use new robust JSON extraction
-            try:
-                reviews_data = self._extract_and_parse_json(ai_response)
-            except ValueError as e:
-                print(f"❌ JSON extraction failed: {e}")
-                print(f"Response was: {ai_response[:500]}...")
-                # Fallback: return error for each file
-                return {fp: f"⚠️ AI Review Failed: Could not parse JSON response\n\nPlease try again." for fp in file_diffs.keys()}
-            
-            # Format each file's review into markdown
-            file_reviews = {}
-            for filepath, review_data in reviews_data.items():
-                file_reviews[filepath] = self._format_review(filepath, review_data)
-            
-            return file_reviews
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON parse failed: {e}")
-        except ValueError as e:
-            print(f"❌ JSON extraction failed: {e}")
-            # Fallback: return error for each file
-            return {fp: f"⚠️ AI Review Failed: Could not parse JSON response\n\nPlease try again." for fp in file_diffs.keys()}
         except Exception as e:
             print(f"❌ Batch review failed: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback: return error for each file
-            return {fp: f"⚠️ AI Review Failed: {str(e)[:100]}" for fp in file_diffs.keys()}
+            return {"error": f"⚠️ AI Review Failed: {str(e)[:100]}"}
 
     def run_inline_review(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None) -> dict:
         """

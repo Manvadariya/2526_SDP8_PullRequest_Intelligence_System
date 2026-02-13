@@ -18,4 +18,9 @@ class Config:
     LLM_BASE_URL = "https://api.a4f.co/v1"
     LLM_MODEL = "provider-5/gpt-oss-20b"
 
+    # Docker config
+    ENABLE_DOCKER_CHECKS = os.getenv("ENABLE_DOCKER_CHECKS", "False").lower() == "true"
+    DOCKER_IMAGE = os.getenv("DOCKER_CHECK_IMAGE", "pr-checks:latest")
+    DOCKER_TIMEOUT = int(os.getenv("DOCKER_TIMEOUT", "300"))
+
 config = Config()

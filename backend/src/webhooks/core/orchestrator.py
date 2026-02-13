@@ -5,9 +5,8 @@ from core.repo_manager import RepoManager
 from core.project_context import ProjectContextBuilder
 from core.types import PRMetadata
 from core.diff_parser import DiffParser
+from core.docker_runner import DockerRunner
 from agents.reviewer import ReviewerAgent
-from agents.linter import LinterAgent
-from agents.security import SecurityAgent
 from models import Job, AgentResult
 from database import engine
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +17,7 @@ class Orchestrator:
     def __init__(self):
         self.gh = GitHubClient()
         self.reviewer = ReviewerAgent()
-        self.linter = LinterAgent()
-        self.security = SecurityAgent()
+        self.docker_runner = DockerRunner()
 
     async def process_pr(self, metadata: PRMetadata, job_id: int):
         print(f"🚀 Job {job_id}: Processing PR #{metadata.pr_number}")
@@ -55,11 +53,26 @@ class Orchestrator:
                     file_diffs = DiffParser.parse_diff(raw_diff)
                     changed_files = list(file_diffs.keys())
                     
-                    # 5. Run Linters (Multi-language, only changed files)
-                    lint_results = self.linter.run(repo_path, changed_files)
-                    
-                    # 6. Run Security Scan
-                    sec_results = self.security.run(repo_path)
+                    # 5. Run Linters + Security in Docker container
+                    docker_results = {"lint": {}, "security": {}}
+                    if app_config.ENABLE_DOCKER_CHECKS:
+                        try:
+                            docker_results = await DockerRunner.run_checks_in_container(repo_path, changed_files)
+                        except Exception as e:
+                            print(f"⚠️ Docker checks failed (continuing with LLM review): {e}")
+                            docker_results = {
+                                "lint": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)},
+                                "security": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)}
+                            }
+                    else:
+                         print("⚠️ Docker checks disabled in config. Skipping.")
+                         docker_results = {
+                             "lint": {"summary": "Disabled by config", "details": []},
+                             "security": {"summary": "Disabled by config", "details": []}
+                         }
+
+                    lint_results = docker_results["lint"]
+                    sec_results = docker_results["security"]
                     
                     # 7. Combine Reports for Context
                     project_context = await ProjectContextBuilder.build(
