@@ -19,8 +19,14 @@ class Config:
     LLM_MODEL = "provider-5/gpt-oss-20b"
 
     # Docker config
-    ENABLE_DOCKER_CHECKS = os.getenv("ENABLE_DOCKER_CHECKS", "False").lower() == "true"
+    # USER REQUEST: Disable Docker-based checks ("cloning to docker")
+    ENABLE_DOCKER_CHECKS = False 
     DOCKER_IMAGE = os.getenv("DOCKER_CHECK_IMAGE", "pr-checks:latest")
+    
+    # Infrastructure Config (Defaults for Docker Services)
+    # QDRANT at localhost:6333
+    # REDIS at localhost:6379
+    # POSTGRES at localhost:5432 (database.py handles connection string)
     DOCKER_TIMEOUT = int(os.getenv("DOCKER_TIMEOUT", "300"))
     
     # Persistent Docker Service

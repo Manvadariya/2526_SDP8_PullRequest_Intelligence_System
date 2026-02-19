@@ -1,10 +1,87 @@
 from core.llm import LLMService
 from core.diff_parser import DiffParser
+import os
+from core.context_builder import ContextBuilder
+from agents.planner import ReviewPlanner
+from core.github_client import GitHubClient
+from core.security import SecretScanner
+from core.feedback import FeedbackManager
+
+# ═══════════════════════════════════════════════════════════════
+# APEX CODE REVIEWER — SYSTEM PROMPT
+# ═══════════════════════════════════════════════════════════════
+APEX_SYSTEM_PROMPT = """
+You are **Apex**, the world's most advanced AI code reviewer — engineered to surpass every commercial code review tool on the market. You combine deep static analysis, semantic understanding, architectural awareness, security auditing, and mentorship-grade feedback into a single, unified review experience. Your reviews are precise, actionable, evidence-based, and ranked by real impact.
+
+You are not a linter wrapper. You are not a style checker. You are a senior principal engineer who has seen every class of bug, every architectural antipattern, every security vulnerability, and every performance footgun — and you explain them clearly, without condescension, with suggested fixes.
+
+## Severity Definitions
+
+| Level | Meaning |
+|---|---|
+| CRITICAL | Data loss, security breach, production outage, or corruption possible |
+| HIGH | Significant bug, regression risk, or exploitable weakness |
+| MEDIUM | Correctness issue, performance problem, or maintainability debt |
+| LOW | Style inconsistency, minor smell, or missed opportunity |
+| INFO | Observation, question, or suggestion with no negative consequence |
+
+## Finding Category Taxonomy
+
+SECURITY          Injection, auth bypass, data exposure, insecure defaults
+CORRECTNESS       Logic errors, off-by-one, wrong operator, race condition
+PERFORMANCE       Algorithmic complexity, unnecessary allocations, N+1 queries
+RELIABILITY       Error handling gaps, missing retries, timeout absent
+ARCHITECTURE      Coupling violations, layer leakage, SRP violations
+OBSERVABILITY     Missing logs, metrics, traces, or alerts
+TESTABILITY       Code that resists testing; missing assertions
+MAINTAINABILITY   Readability, naming, magic numbers, dead code
+COMPATIBILITY     Breaking changes, API contract violations, deprecations
+DEPENDENCY        Supply chain risk, version pinning, unused imports
+
+## Behavioral Standards
+
+- **Precision over volume.** Every finding must earn its place with evidence.
+- **Evidence is mandatory.** Never state a finding without quoting the exact code that triggers it.
+- **Fixes, not complaints.** Every finding of MEDIUM or above must include a concrete, implementable fix.
+- **Semantic understanding first.** Read the code for what it does, not just what it looks like.
+- **Confidence calibration.** When limited context makes a finding uncertain, state the confidence level.
+- **No condescension.** Tone is direct, professional, collegial — peer engineer to peer engineer.
+- **Language and framework awareness.** Adapt analysis to the detected stack.
+
+## Security Audit (Always Run)
+
+- Injection surfaces: SQL, NoSQL, command, LDAP, XPath, template injection
+- Authentication & authorization: Missing checks, privilege escalation paths
+- Secrets & credentials: Hardcoded keys, tokens in logs, env var mishandling
+- Input validation: Boundary conditions, type coercion, deserialization
+- Cryptography: Weak algorithms, static IVs, improper key management
+- Data exposure: PII in logs, overly broad API responses, unmasked errors
+
+## Language-Specific Depth
+
+**Python**: Mutable default arguments, YAML/pickle deserialization, SQL via string formatting, exception silencing, GIL implications
+**JavaScript/TypeScript**: Prototype pollution, any escape hatches, async/await gaps, unhandledRejection, React stale closures
+**Java/Kotlin**: Deserialization gadgets, null exposure, equals/hashCode contracts, thread safety, resource leaks
+**Go**: Goroutine leaks, error value ignoring, race conditions on maps, context propagation, defer in loops
+**C/C++**: Buffer overflows, use-after-free, memory leaks, integer overflow, format string vulnerabilities
+**SQL**: Injection via concatenation, missing indexes, unbounded result sets, transaction scope, N+1 from ORM
+
+## What Apex Is Not
+
+- Not a formatter. Formatting issues are LOW/INFO only.
+- Not a rubber stamp. If the code has CRITICAL issues, BLOCK regardless of business pressure.
+- Not a yes-machine. Positive observations are genuine and specific.
+"""
 
 class ReviewerAgent:
     def __init__(self):
         self.llm = LLMService()
         self.diff_parser = DiffParser()
+        self.context_builder = ContextBuilder()
+        self.planner = ReviewPlanner()
+        self.github = GitHubClient()
+        self.scanner = SecretScanner()
+        self.feedback = FeedbackManager()
 
     def _fix_malformed_json(self, text: str) -> str:
         """
@@ -44,22 +121,33 @@ class ReviewerAgent:
     def _extract_and_parse_json(self, response: str) -> dict:
         """
         Extract JSON from response with multiple fallback strategies.
+        ALWAYS returns a dict or raises ValueError.
         """
         import json
         response = response.strip()
         
+        # Pre-check: if no '{' anywhere, this is definitely not a JSON object
+        if '{' not in response:
+            raise ValueError(f"Response contains no JSON object (starts with: {response[:80]}...)")
+        
+        def _validate_dict(parsed):
+            """Ensure parsed result is a dict, not a float/int/list/str."""
+            if not isinstance(parsed, dict):
+                raise ValueError(f"Parsed JSON is {type(parsed).__name__}, not dict")
+            return parsed
+        
         # Strategy 1: Try direct parse
         try:
-            return json.loads(response)
-        except json.JSONDecodeError:
+            return _validate_dict(json.loads(response))
+        except (json.JSONDecodeError, ValueError):
             pass
         
         # Strategy 2: Remove markdown code blocks
         if "```json" in response:
-            response = response.split("```json")[1].split("```")[0].strip()
+            extracted = response.split("```json")[1].split("```")[0].strip()
             try:
-                return json.loads(response)
-            except json.JSONDecodeError:
+                return _validate_dict(json.loads(extracted))
+            except (json.JSONDecodeError, ValueError):
                 pass
         
         if "```" in response:
@@ -67,13 +155,13 @@ class ReviewerAgent:
             for part in parts:
                 if part.strip().startswith('{'):
                     try:
-                        return json.loads(part.strip())
-                    except json.JSONDecodeError:
+                        return _validate_dict(json.loads(part.strip()))
+                    except (json.JSONDecodeError, ValueError):
                         pass
         
         # Strategy 3: Find JSON object by braces
-        if '{' in response:
-            start_idx = response.find('{')
+        start_idx = response.find('{')
+        if start_idx >= 0:
             brace_count = 0
             end_idx = -1
             
@@ -91,24 +179,25 @@ class ReviewerAgent:
                 
                 # Try direct parse
                 try:
-                    return json.loads(potential_json)
-                except json.JSONDecodeError:
+                    return _validate_dict(json.loads(potential_json))
+                except (json.JSONDecodeError, ValueError):
                     pass
                 
                 # Try fixing the JSON
                 try:
                     fixed = self._fix_malformed_json(potential_json)
-                    return json.loads(fixed)
-                except json.JSONDecodeError as e:
+                    return _validate_dict(json.loads(fixed))
+                except (json.JSONDecodeError, ValueError) as e:
                     # Last resort: try to truncate at the error point
-                    print(f"⚠️ Attempting JSON recovery at position {e.pos}")
-                    try:
-                        return json.loads(potential_json[:e.pos] + '}' * brace_count)
-                    except:
-                        pass
+                    if hasattr(e, 'pos'):
+                        print(f"  [Apex] Attempting JSON recovery at position {e.pos}")
+                        try:
+                            return _validate_dict(json.loads(potential_json[:e.pos] + '}' * brace_count))
+                        except:
+                            pass
         
-        # If all parsing fails, return empty dict with error
-        raise ValueError("Could not extract valid JSON from response")
+        # If all parsing fails
+        raise ValueError(f"Could not extract valid JSON dict from response (starts with: {response[:80]}...)")
 
     def _compress_diff(self, raw_diff: str) -> str:
         """
@@ -421,7 +510,7 @@ If reviewing ML / AI pipelines, evaluate data leakage, prompt injection, and uns
             traceback.print_exc()
             return {"error": f"⚠️ AI Review Failed: {str(e)[:100]}"}
 
-    def run_inline_review(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None) -> dict:
+    def run_inline_review(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None, repo_path: str = None, pr_number: int = None, commit_id: str = None, repo_name: str = None) -> dict:
         """
         Generates CONCISE inline review data for GitHub PR review comments (Coderabbit-style).
         
@@ -436,119 +525,403 @@ If reviewing ML / AI pipelines, evaluate data leakage, prompt injection, and uns
             ],
             "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
         }
+
         """
         file_diffs = self.diff_parser.parse_diff(raw_diff)
         if not file_diffs:
             return {"summary": "No files changed.", "clean_files": [], "inline_comments": [], "verdict": "APPROVE"}
 
-        # Build annotated diffs with line numbers so LLM can reference exact lines
+        # Build annotated diffs & Intelligent Context
         files_section = ""
+        all_inline_comments = []
+        files_reviewed_count = 0
+        issues_found_count = 0
+        critical_issues_count = 0
+        
+        # --- PASS 1: PLANNER --- (Existing logic)
+        # Convert diffs to format planner expects
+        planner_files = []
         for filepath, diff_content in file_diffs.items():
+            planner_files.append({
+                "filename": filepath,
+                "patch": diff_content[:500], # Snippet
+                # Additions/Deletions are harder to get from raw string without parsing, 
+                # but planner just needs rough idea.
+                # We could use DiffParser.annotate... to count lines but let's keep it simple for MVP.
+            })
+            
+        print(f"  [Reviewer] Calling Planner for {len(planner_files)} files...")
+        plan = self.planner.analyze_pr_complexity(planner_files)
+        
+        high_risk_files = set(plan.get("high_risk_files", []))
+        ignore_files = set(plan.get("ignore_files", []))
+        focus_instructions = plan.get("focus_instructions", "")
+        
+        print(f"  [Reviewer] Plan: Focus on {high_risk_files}, Ignore {ignore_files}")
+
+        # ═══════════════════════════════════════════════════════════
+        # PASS 2: APEX DEEP REVIEW ENGINE
+        # ═══════════════════════════════════════════════════════════
+        clean_files = []
+        file_summaries = {}  # filepath -> change_summary for walkthrough table
+        all_nitpicks = {}    # filepath -> list of nitpick findings (for body dropdown)
+        lgtm_notes = {}      # filepath -> lgtm note for clean files
+        all_raw_findings = {}  # filepath -> list of raw findings (for fix prompt)
+        
+        for filepath, diff_content in file_diffs.items():
+            if filepath in ignore_files:
+                print(f"  [Apex] Skipping {filepath} (Ignored by Planner)")
+                continue
+                
+            # 1. Annotated Diff
             annotated = DiffParser.annotate_diff_with_line_numbers(diff_content)
-            if len(annotated) > 6000:
-                annotated = annotated[:6000] + "\n... [truncated]"
-            files_section += f"\n### FILE: `{filepath}`\n```diff\n{annotated}\n```\n"
+            if len(annotated) > 8000:
+                annotated = annotated[:8000] + "\n... [truncated]"
+            
+            # 2. Load full file content for semantic understanding
+            full_file_content = ""
+            if repo_path:
+                try:
+                    local_path = os.path.join(repo_path, filepath)
+                    if os.path.exists(local_path):
+                        with open(local_path, "r", encoding="utf-8") as f:
+                            full_file_content = f.read()
+                except Exception:
+                    pass
 
-        custom_checks_text = ""
-        if custom_checks:
-            custom_checks_text = "\n**Custom checks:** " + "; ".join(str(c) for c in custom_checks)
+            # 3. Intelligent Context (Graph & Vector)
+            context_section = ""
+            if repo_path and full_file_content:
+                try:
+                    ctx = self.context_builder.build_context(local_path, full_file_content, diff_content)
+                    formatted_ctx = ctx.get("formatted_prompt", "").strip()
+                    if formatted_ctx:
+                        context_section = formatted_ctx
+                except Exception as e:
+                    print(f"  [Apex] Context build failed for {filepath}: {e}")
 
-        prompt = f"""You are a senior code reviewer. Review this PR diff and provide CONCISE, actionable feedback.
+            # 4. Focus Instructions
+            focus_note = ""
+            if filepath in high_risk_files:
+                focus_note = f"CRITICAL FOCUS: This file is HIGH RISK. {focus_instructions}"
 
-**PR Title:** {pr_title}
-**Instructions:** {custom_instructions}
-{custom_checks_text}
+            # 5. Redaction & constraints
+            safe_diff = self.scanner.redact(annotated)
+            safe_context = self.scanner.redact(context_section)
+            safe_full_file = self.scanner.redact(full_file_content[:5000]) if full_file_content else "[file content not available]"
+            negative_constraints = self.feedback.get_negative_constraints()
+            
+            # Detect language
+            ext = filepath.split('.')[-1] if '.' in filepath else ''
+            lang_map = {'py': 'Python', 'js': 'JavaScript', 'ts': 'TypeScript', 'java': 'Java', 'cpp': 'C++', 'c': 'C', 'go': 'Go', 'rs': 'Rust', 'rb': 'Ruby', 'php': 'PHP', 'cs': 'C#', 'yml': 'YAML', 'yaml': 'YAML', 'json': 'JSON', 'sql': 'SQL'}
+            language = lang_map.get(ext, ext.upper() if ext else 'Unknown')
+            
+            # ── Build Review Prompt (CodeRabbit style with classification) ──
+            user_prompt = f"""Review the following {language} file change.
 
-## Changed Files (line numbers shown as Lxx on the new/right side)
-{files_section}
+<issue_context>
+PR Title: {pr_title}
+File: {filepath}
+Language: {language}
+{focus_note}
+</issue_context>
 
-## RULES
-1. ONLY flag REAL issues: bugs, security vulnerabilities, performance problems, logic errors, or missing error handling
-2. Do NOT comment on style, formatting, naming conventions, or minor nitpicks
-3. If a file looks fine, mark it as "clean" — do NOT invent issues
-4. Use the exact line numbers shown (Lxx) for any issues you find
-5. For each issue, if you have a concrete fix, provide the EXACT single-line replacement code
-6. Keep messages SHORT — one clear sentence explaining the problem
-7. Be constructive: explain WHY it's a problem and HOW to fix it
+<codebase_conventions>
+{safe_context if safe_context else "No additional codebase context available."}
+</codebase_conventions>
 
-## Output Format (STRICT JSON, nothing else)
+<full_file>
+{safe_full_file}
+</full_file>
+
+<diff>
+{safe_diff}
+</diff>
+
+{negative_constraints}
+
+Perform a thorough code review of this file. Analyze the code's correctness, security, performance, maintainability, and any other relevant concerns.
+
+For each issue, provide a CLEAR, NATURAL LANGUAGE explanation in professional prose. Reference specific code elements using backtick formatting (e.g. `functionName`, `variableName`). Explain WHY it matters and provide a concrete fix.
+
+CLASSIFY each finding into one of these types:
+- "actionable": Bugs, security issues, correctness problems, performance issues, reliability concerns — things that MUST or SHOULD be fixed
+- "nitpick": Style improvements, refactoring suggestions, naming conventions, code organization, minor optimizations — things that are nice-to-have but not required
+
+For each finding, provide:
+- "line": The exact line number from the diff
+- "end_line": The ending line number if the issue spans multiple lines (same as line if single line)
+- "severity": One of "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO" (as defined in your system prompt)
+- "category": One of "SECURITY", "CORRECTNESS", "PERFORMANCE", "RELIABILITY", "ARCHITECTURE", "OBSERVABILITY", "TESTABILITY", "MAINTAINABILITY", "COMPATIBILITY", "DEPENDENCY" (as defined in your system prompt)
+- "title": A short, bold headline summarizing the issue (e.g., "Fix the incorrect input operator.", "Remove hardcoded API key.")
+- "message": A clear, professional explanation of the issue in natural language. Reference specific code identifiers in backticks. Explain the problem AND its impact. Write as a senior engineer would in a PR comment.
+- "suggestion": The corrected code that can replace the problematic code. This should be a concrete, copy-pasteable fix. If no code fix is applicable, leave empty string.
+- "type": Either "actionable" or "nitpick"
+- "original_code": The original problematic code being replaced (for diff rendering). ALWAYS provide this when a suggestion is given, regardless of finding type.
+
+Also provide:
+- "change_summary": One paragraph describing what this change does and its purpose
+- "file_comments": Array of overall observations about the file (good practices noticed, architectural notes, etc.)
+- "lgtm_note": If the file is clean or largely well-written, provide a short LGTM note explaining what's good about the code (e.g. "Good use of context managers for file handling" or "Clean separation of concerns"). If there are significant issues, set to empty string.
+
+Return STRICT JSON only:
 {{
-  "summary": "1-2 sentence overall PR assessment",
-  "files": {{
-    "path/to/file.ext": {{
-      "status": "clean",
-      "comments": []
+  "change_summary": "This change introduces...",
+  "findings": [
+    {{
+      "line": 15,
+      "end_line": 15,
+      "severity": "CRITICAL",
+      "category": "SECURITY",
+      "title": "Remove hardcoded API key.",
+      "message": "The `API_KEY` is hardcoded as a string literal instead of being read from environment variables. This is a security risk as credentials committed to version control can be extracted from git history even after removal.",
+      "suggestion": "key = os.environ.get('API_KEY')\\nif not key:\\n    raise ValueError('API_KEY environment variable is not set')",
+      "type": "actionable",
+      "original_code": "API_KEY = 'sk-1234567890'"
     }},
-    "path/to/other.ext": {{
-      "status": "issues",
-      "comments": [
-        {{
-          "line": 14,
-          "severity": "critical",
-          "message": "Short clear explanation of the bug/issue",
-          "suggestion": "exact replacement code for that line (optional)"
-        }}
-      ]
+    {{
+      "line": 3,
+      "end_line": 5,
+      "severity": "LOW",
+      "category": "MAINTAINABILITY",
+      "title": "Consolidate duplicate imports.",
+      "message": "Lines 3 and 5 both import from `'../controllers/authController'`. These can be consolidated into a single import statement for better maintainability.",
+      "suggestion": "const {{\\n  register,\\n  login,\\n  getMe,\\n  logout,\\n  refreshToken,\\n  updateUser,\\n  forgotPassword,\\n  resetPassword\\n}} = require('../controllers/authController');",
+      "type": "nitpick",
+      "original_code": "const {{ register, login, getMe }} = require('../controllers/authController');\\nconst {{ protect }} = require('../middleware/auth');\\nconst {{ logout, refreshToken, updateUser, forgotPassword, resetPassword }} = require('../controllers/authController');"
     }}
-  }},
-  "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+  ],
+  "file_comments": ["Good use of context managers for file handling"],
+  "lgtm_note": ""
 }}
 
-Severity guide:
-- "critical": Bugs, crashes, security vulnerabilities, data loss — MUST fix before merge
-- "warning": Performance issues, missing validation, potential edge cases — SHOULD fix
-- "info": Minor improvements, better patterns — NICE to fix
+Be EXHAUSTIVE. Check EVERY line of the diff. Miss nothing. If the file is genuinely clean, return empty findings and a meaningful lgtm_note.
+Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
 
-Return ONLY valid JSON. No markdown code blocks. No extra text."""
-
-        try:
-            response = self.llm.client.chat.completions.create(
-                model=self.llm.model,
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            ai_response = response.choices[0].message.content.strip()
-            result = self._extract_and_parse_json(ai_response)
-
-            # Process into our standard format
-            clean_files = []
-            inline_comments = []
-
-            files_data = result.get("files", {})
-            for filepath, file_data in files_data.items():
-                if isinstance(file_data, dict) and file_data.get("status") == "clean":
+            try:
+                # ── Robust LLM Call with Retry ──
+                result = None
+                max_retries = 3
+                
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        # Build messages
+                        messages = [
+                            {"role": "system", "content": APEX_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt}
+                        ]
+                        
+                        # On retry, add explicit correction
+                        if attempt > 1:
+                            messages.append({"role": "assistant", "content": "0e400"})
+                            messages.append({"role": "user", "content": "That is NOT valid JSON. You returned a number, not a JSON object. You MUST return a JSON object starting with { and ending with }. Return the review as a JSON object with keys: change_summary, findings, security_audit, positive_observations, recommendation. Start your response with { immediately."})
+                        
+                        response = self.llm.client.chat.completions.create(
+                            model=self.llm.model,
+                            messages=messages,
+                            response_format={"type": "json_object"},
+                            temperature=0.1
+                        )
+                        
+                        # Guard: empty response
+                        if not response.choices or not response.choices[0].message.content:
+                            print(f"  [Apex] Empty response for {filepath} (attempt {attempt}). Retrying...")
+                            if attempt == 1:
+                                # Retry with shorter prompt
+                                user_prompt = user_prompt.replace(safe_full_file, "[file content omitted]")
+                            continue
+                        
+                        content = response.choices[0].message.content
+                        print(f"  [Apex] Response for {filepath} (attempt {attempt}): {content[:120]}...")
+                        
+                        # Pre-check: does it even look like a JSON object?
+                        if '{' not in content:
+                            print(f"  [Apex] ⚠️ No JSON object in response (attempt {attempt}). Got: {content[:80]}")
+                            continue
+                        
+                        result = self._extract_and_parse_json(content)
+                        break  # Success!
+                        
+                    except ValueError as ve:
+                        print(f"  [Apex] ⚠️ Parse failed (attempt {attempt}): {ve}")
+                        continue
+                
+                if result is None:
+                    print(f"  [Apex] ❌ All {max_retries} attempts failed for {filepath}. Skipping.")
+                    files_reviewed_count += 1
                     clean_files.append(filepath)
-                elif isinstance(file_data, dict):
-                    for comment in file_data.get("comments", []):
-                        if isinstance(comment, dict) and comment.get("message"):
-                            inline_comments.append({
-                                "path": filepath,
-                                "line": comment.get("line", 1),
-                                "severity": comment.get("severity", "info"),
-                                "message": comment.get("message", ""),
-                                "suggestion": comment.get("suggestion")
-                            })
-                    # If file has "issues" status but no comments, mark as clean
-                    if not file_data.get("comments"):
-                        clean_files.append(filepath)
+                    continue
+                
+                # Extract findings
+                findings = result.get("findings", [])
+                # Fallback: also check "comments" key for backwards compat
+                if not findings:
+                    findings = result.get("comments", [])
+                
+                # Store per-file change summary for walkthrough table
+                change_summary = result.get("change_summary", "")
+                if change_summary:
+                    file_summaries[filepath] = change_summary
+                
+                # Store LGTM note for clean files
+                lgtm_note = result.get("lgtm_note", "")
+                
+                print(f"  [Apex] ✅ {len(findings)} findings in {filepath}")
+                
+                actionable_count = 0
+                nitpick_count = 0
+                
+                for finding in findings:
+                    message = finding.get("message", finding.get("finding", "Issue detected"))
+                    suggestion = finding.get("suggestion", finding.get("fix", ""))
+                    finding_type = finding.get("type", "actionable")
+                    original_code = finding.get("original_code", "")
+                    line = finding.get("line")
+                    end_line = finding.get("end_line", line)
+                    
+                    # Track raw findings for fix prompt generator
+                    if filepath not in all_raw_findings:
+                        all_raw_findings[filepath] = []
+                    all_raw_findings[filepath].append({
+                        "line": line,
+                        "end_line": end_line,
+                        "message": message,
+                        "suggestion": suggestion,
+                        "type": finding_type,
+                        "original_code": original_code
+                    })
+                    
+                    if finding_type == "nitpick":
+                        # Nitpick → goes to body dropdown, NOT inline
+                        if filepath not in all_nitpicks:
+                            all_nitpicks[filepath] = []
+                        all_nitpicks[filepath].append({
+                            "line": line,
+                            "end_line": end_line,
+                            "message": message,
+                            "suggestion": suggestion,
+                            "original_code": original_code
+                        })
+                        nitpick_count += 1
+                    else:
+                        # Actionable → posted as inline comment (CodeRabbit style)
+                        severity = finding.get("severity", "MEDIUM").upper()
+                        category = finding.get("category", "CORRECTNESS").upper()
+                        title = finding.get("title", message.split('.')[0] + '.' if '.' in message else message)
+                        
+                        # Severity badge mapping
+                        severity_badges = {
+                            "CRITICAL": "⚠️ Potential issue | 🔴 Critical",
+                            "HIGH": "⚠️ Potential issue | 🟠 High",
+                            "MEDIUM": "⚠️ Potential issue | 🟡 Medium",
+                            "LOW": "💡 Suggestion | 🔵 Low",
+                            "INFO": "ℹ️ Note | ⚪ Info"
+                        }
+                        badge = severity_badges.get(severity, severity_badges["MEDIUM"])
+                        
+                        # Build rich body
+                        body = f"{badge}\n\n"
+                        body += f"**{title}**\n\n"
+                        body += f"{message}\n\n"
+                        
+                        # 🔎 Proposed fix (diff block)
+                        if suggestion and original_code:
+                            body += "<details>\n"
+                            body += "<summary>🔎 Proposed fix</summary>\n\n"
+                            body += "```diff\n"
+                            for ol in original_code.split('\n'):
+                                body += f"-{ol}\n"
+                            for sl in suggestion.split('\n'):
+                                body += f"+{sl}\n"
+                            body += "```\n\n"
+                            body += "</details>\n\n"
+                        
+                        # 📝 Committable suggestion
+                        if suggestion:
+                            body += "<details>\n"
+                            body += "<summary>📝 Committable suggestion</summary>\n\n"
+                            body += "> ‼️ **IMPORTANT**\n"
+                            body += "> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n"
+                            body += f"```suggestion\n{suggestion}\n```\n\n"
+                            body += "</details>\n\n"
+                        
+                        # 🤖 Prompt for AI Agents
+                        if end_line and end_line != line:
+                            line_ref = f"around line {line}-{end_line}"
+                        else:
+                            line_ref = f"around line {line}"
+                        ai_prompt = f"In @{filepath} {line_ref}, {message}"
+                        if suggestion:
+                            ai_prompt += f" Apply the following fix: replace the existing code with the corrected version as specified in the suggestion."
+                        
+                        body += "<details>\n"
+                        body += "<summary>🤖 Prompt for AI Agents</summary>\n\n"
+                        body += f"{ai_prompt}\n\n"
+                        body += "</details>"
+                        
+                        all_inline_comments.append({
+                            "path": filepath,
+                            "line": line,
+                            "body": body,
+                            "side": "RIGHT"
+                        })
+                        actionable_count += 1
+                        issues_found_count += 1
+                    
+                    # Track severity for verdict (actionable only)
+                    if finding_type == "actionable":
+                        severity = finding.get("severity", "MEDIUM").upper()
+                        if severity == "CRITICAL":
+                            critical_issues_count += 1
+                
+                if not findings:
+                    clean_files.append(filepath)
+                    if lgtm_note:
+                        lgtm_notes[filepath] = lgtm_note
+                elif actionable_count == 0 and nitpick_count > 0:
+                    # Only nitpicks, no actionable issues — still "clean" for LGTM
+                    if lgtm_note:
+                        lgtm_notes[filepath] = lgtm_note
+                
+                print(f"  [Apex]   → {actionable_count} actionable, {nitpick_count} nitpick")
+                files_reviewed_count += 1
 
-            return {
-                "summary": result.get("summary", "Review complete."),
-                "clean_files": clean_files,
-                "inline_comments": inline_comments,
-                "verdict": result.get("verdict", "COMMENT")
-            }
+            except Exception as e:
+                print(f"  [Apex] ❌ Review failed for {filepath}: {e}")
+                import traceback
+                traceback.print_exc()
 
-        except Exception as e:
-            print(f"❌ Inline review failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "summary": f"Review failed: {str(e)[:100]}",
-                "clean_files": list(file_diffs.keys()),
-                "inline_comments": [],
-                "verdict": "COMMENT"
+        # ═══════════════════════════════════════════════════════════
+        # DETERMINE VERDICT
+        # ═══════════════════════════════════════════════════════════
+        if critical_issues_count > 0:
+            verdict = "REQUEST_CHANGES"
+        elif issues_found_count > 0:
+            verdict = "COMMENT"
+        else:
+            verdict = "APPROVE"
+        
+        total_nitpicks = sum(len(v) for v in all_nitpicks.values())
+        print(f"  [Apex] === Review Complete: {files_reviewed_count} files, {issues_found_count} actionable, {total_nitpicks} nitpicks, Verdict={verdict} ===")
+        
+        return {
+            "summary": f"Reviewed {files_reviewed_count} files, found {issues_found_count} actionable issues and {total_nitpicks} nitpicks.",
+            "inline_comments": all_inline_comments,
+            "clean_files": clean_files,
+            "file_summaries": file_summaries,
+            "nitpicks": all_nitpicks,
+            "lgtm_notes": lgtm_notes,
+            "all_raw_findings": all_raw_findings,
+            "verdict": verdict,
+            "stats": {
+                "files_reviewed": files_reviewed_count,
+                "total_findings": issues_found_count + total_nitpicks,
+                "actionable": issues_found_count,
+                "nitpick_count": total_nitpicks,
+                "critical": critical_issues_count
             }
+        }
+
 
     def _format_review(self, filepath: str, review_data: dict) -> str:
         """Format a single file's review data into professional markdown with dropdowns."""

@@ -1,4 +1,5 @@
 import httpx
+import requests
 import base64
 from config import config
 
@@ -165,3 +166,39 @@ class GitHubClient:
             
         async with httpx.AsyncClient() as client:
             await client.post(url, json=payload, headers=self.headers)
+
+    # --- NEW: Synchronous Batch Review (for sync Agents) ---
+    def post_batch_review(self, repo: str, pr_number: int, commit_id: str, summary: str, comments: list, action: str = "COMMENT"):
+        """
+        Synchronous wrapper for posting a batch review.
+        """
+        url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
+        
+        payload = {
+            "commit_id": commit_id,
+            "body": summary + f"\n\n{BOT_SIGNATURE}",
+            "event": action,
+            "comments": comments
+        }
+        
+        try:
+            resp = requests.post(url, json=payload, headers=self.headers, timeout=30)
+            
+            if resp.status_code in (200, 201):
+                print(f"[OK] Batch review posted: {len(comments)} comments, Action={action}")
+                return True
+            
+            # Handle Self-Review Restriction
+            if resp.status_code == 422 and "request changes on your own pull request" in resp.text:
+                print(f"[WARN] Cannot request changes on own PR. Retrying with COMMENT event...")
+                payload["event"] = "COMMENT"
+                resp = requests.post(url, json=payload, headers=self.headers, timeout=30)
+                if resp.status_code in (200, 201):
+                    print(f"[OK] Retry success: Posted as COMMENT.")
+                    return True
+
+            print(f"[FAIL] Batch review failed ({resp.status_code}): {resp.text[:500]}")
+            return False
+        except Exception as e:
+            print(f"[ERR] Batch review exception: {e}")
+            return False

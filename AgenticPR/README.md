@@ -1,57 +1,16 @@
-# AgenticPR
+# React + Vite
 
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-A Pull Request Intelligence System frontend built with React and Vite.
+Currently, two official plugins are available:
 
-## Getting Started
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-Follow these steps to set up and run the project locally.
+## React Compiler
 
-### Prerequisites
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-- Node.js (Latest LTS version recommended)
+## Expanding the ESLint configuration
 
-### Installation
-
-1. Navigate to the project directory:
-   ```bash
-   cd AgenticPR
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-### Running the App
-
-Start the development server:
-
-```bash
-npm run dev
-```
-
-The application will be available at `http://localhost:5173` (or the port shown in your terminal).
-
-## Scripts
-
-- `npm run dev`: Starts the development server.
-- `npm run build`: Builds the app for production.
-- `npm run preview`: Previews the production build locally.
-- `npm run lint`: Runs ESLint to check for code quality issues.
-
-## Tech Stack
-
-- **Framework**: React
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-
-
-## History
-
-- LAB 1 : 8 Dec 2025 : Added Basic Project setup + Added frontend sections
-
-- LAB 2 : 15 Dec 2025 : Added basic workflow in n8n and github api's to fetch PR data and diffs
-
-- Lab 3 : 22 Dec 2025 : Added Github Official MCP and tried various function call with differnt LLM's 
-
-![alt text](image.png)
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.

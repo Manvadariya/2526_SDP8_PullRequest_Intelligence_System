@@ -1,2 +1,24 @@
 backend/src/webhooks/notes.md
 PROJECT.md
+
+.agents/
+qdrant_storage/
+backend/src/webhooks/qdrant_data/
+backend/src/webhooks/index_state.json
+backend/src/webhooks/core/feedback_log.json
+backend/src/webhooks/core/test_feedback.json
+backend/src/webhooks/test_*.json
+database.db
+ai_review_workspace/
+
+# Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+.env
+*.log
+
+# Node
+node_modules/
+AgenticPR/dist/
+AgenticPR/.env
