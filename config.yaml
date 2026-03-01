@@ -1,0 +1,3 @@
+agents:
+  - name: stitch-skills
+    path: .agents/stitch-skills
