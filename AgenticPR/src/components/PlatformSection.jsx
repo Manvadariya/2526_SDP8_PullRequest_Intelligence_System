@@ -22,10 +22,10 @@ export default function PlatformSection() {
                     <div className="w-full h-4 sm:h-5" />
                     <div className="max-w-5xl">
                         <h2 className="text-[1.353rem] sm:text-[1.691rem] font-semibold tracking-tight text-juniper-11">
-                            Deep code review with hybrid static analysis and AI agents.{' '}
+                            AI-powered PR analysis with multi-agent orchestration.{' '}
                             <span className="sm:block text-gray-10 font-[550] leading-snug">
-                                High-signal, low false-positive issues and structured feedback across security,
-                                quality, complexity, and coverage.
+                                High-signal reviews across security, quality, performance, and custom team standards
+                                — delivered as inline GitHub comments on every PR.
                             </span>
                         </h2>
                     </div>

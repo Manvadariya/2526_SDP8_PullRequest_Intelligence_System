@@ -1,24 +1,24 @@
 const footerLinks = {
     Product: [
-        { label: 'Pricing', href: 'https://deepsource.com/pricing' },
-        { label: 'Benchmarks', href: 'https://deepsource.com/benchmarks' },
-        { label: 'Integrations', href: 'https://deepsource.com/integrations' },
-        { label: 'Changelog', href: 'https://deepsource.com/changelog' },
-        { label: 'Docs', href: 'https://docs.deepsource.com/' },
+        { label: 'Features', href: '#features' },
+        { label: 'How It Works', href: '#how-it-works' },
+        { label: 'Integrations', href: '/integrations' },
+        { label: 'Changelog', href: '/changelog' },
+        { label: 'Docs', href: '/docs' },
     ],
-    Company: [
-        { label: 'About', href: 'https://deepsource.com/about' },
-        { label: 'Customers', href: 'https://deepsource.com/customers' },
-        { label: 'Blog', href: 'https://deepsource.com/blog' },
-        { label: 'Careers', href: 'https://deepsource.com/careers' },
-        { label: 'Contact', href: 'https://deepsource.com/contact' },
+    Project: [
+        { label: 'About', href: '/about' },
+        { label: 'GitHub', href: 'https://github.com' },
+        { label: 'README', href: '/docs' },
+        { label: 'Report an Issue', href: '/issues' },
+        { label: 'Contact', href: '/contact' },
     ],
     Resources: [
-        { label: 'Learning Center', href: 'https://deepsource.com/learn' },
-        { label: 'Community', href: 'https://deepsource.com/community' },
-        { label: 'Status', href: 'https://status.deepsource.com/' },
-        { label: 'Security', href: 'https://deepsource.com/security' },
-        { label: 'Privacy', href: 'https://deepsource.com/privacy' },
+        { label: 'API Reference', href: '/docs/api' },
+        { label: 'Configuration', href: '/docs/config' },
+        { label: 'MCP Protocol', href: '/docs/mcp' },
+        { label: 'Security Policy', href: '/security' },
+        { label: 'Privacy', href: '/privacy' },
     ],
 };
 
@@ -29,13 +29,12 @@ export default function Footer() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
                     {/* Logo & description */}
                     <div className="col-span-2 sm:col-span-1">
-                        <img
-                            src="https://deepsource.com/_nuxt/wordmark-light.CU2fWIAi.svg"
-                            alt="DeepSource"
-                            className="h-6 w-auto"
-                        />
+                        <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded bg-juniper-7 flex items-center justify-center text-white font-bold text-[10px]">PR</div>
+                            <span className="font-bold text-base text-white tracking-tight">AgenticPR</span>
+                        </div>
                         <p className="mt-4 text-[0.789rem] text-gray-8 leading-relaxed">
-                            AI Code Review Platform. Ship production-ready code with confidence.
+                            AI-Powered Pull Request Intelligence. Ship production-ready code with confidence.
                         </p>
                     </div>
 
@@ -64,18 +63,18 @@ export default function Footer() {
                 {/* Bottom bar */}
                 <div className="mt-16 pt-8 border-t border-ink-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                     <p className="text-[0.789rem] text-gray-8">
-                        © {new Date().getFullYear()} DeepSource Corp. All rights reserved.
+                        © {new Date().getFullYear()} AgenticPR · SDP8 Academic Project. All rights reserved.
                     </p>
                     <div className="flex items-center gap-6">
-                        <a href="https://deepsource.com/terms" className="text-[0.789rem] text-gray-8 hover:text-white">
+                        <a href="/terms" className="text-[0.789rem] text-gray-8 hover:text-white">
                             Terms
                         </a>
-                        <a href="https://deepsource.com/privacy" className="text-[0.789rem] text-gray-8 hover:text-white">
+                        <a href="/privacy" className="text-[0.789rem] text-gray-8 hover:text-white">
                             Privacy
                         </a>
                         {/* Social icons */}
                         <a
-                            href="https://github.com/deepsourcelabs"
+                            href="https://github.com"
                             className="text-gray-8 hover:text-white"
                             aria-label="GitHub"
                         >
@@ -84,7 +83,7 @@ export default function Footer() {
                             </svg>
                         </a>
                         <a
-                            href="https://twitter.com/deaborelabs"
+                            href="https://twitter.com"
                             className="text-gray-8 hover:text-white"
                             aria-label="Twitter"
                         >

@@ -1,90 +1,81 @@
-const DeepSourceLogo = () => (
-    <img
-        src="data:image/svg+xml,%3csvg%20width='28'%20height='32'%20viewBox='0%200%2028%2032'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M0%2032V0H11.2568C14.7546%200%2017.6898%200.763592%2020.1422%202.3315C22.5544%203.85916%2024.4036%205.86922%2025.6099%208.32144C26.8157%2010.7737%2027.4591%2013.3466%2027.4591%2016C27.4591%2018.6937%2026.856%2021.2661%2025.6099%2023.6786C24.4036%2026.1308%2022.5544%2028.1006%2020.1422%2029.6685C17.7296%2031.1962%2014.7546%2032%2011.2568%2032H2.09068C1.46057%2032%200.193974%2032%200%2032Z'%20fill='%23080808'/%3e%3cpath%20d='M4.54303%207.19617H15.9608C16.9257%207.19617%2017.7296%208%2017.7296%208.96479C17.7296%209.92958%2016.9257%2010.7339%2015.9608%2010.7339H4.54303V7.19617Z'%20fill='%233DDC97'/%3e%3cpath%20d='M4.54303%2021.1861H18.5339C19.4988%2021.1861%2020.3027%2021.9899%2020.3027%2022.9547C20.3027%2023.9195%2019.4988%2024.7238%2018.5339%2024.7238H4.54303V21.1861Z'%20fill='%23F12A1F'/%3e%3cpath%20d='M4.54303%2014.1911H12.4631C13.428%2014.1911%2014.2318%2014.995%2014.2318%2015.9598C14.2318%2016.9245%2013.428%2017.7289%2012.4631%2017.7289H4.54303V14.1911Z'%20fill='%23FFB400'/%3e%3c/svg%3e"
-        alt="DeepSource"
-        className="w-7 h-7"
-    />
+const AgenticPRLogo = () => (
+    <div className="w-7 h-7 rounded bg-juniper-7 flex items-center justify-center text-white font-bold text-[10px]">PR</div>
 );
 
 const annotations = [
     {
-        file: 'payments/reconciliation.py',
-        lineStart: 142,
-        lineEnd: 144,
+        file: 'backend/src/webhooks/agents/reviewer.py',
+        lineStart: 84,
+        lineEnd: 87,
         lines: [
-            '            for merchant_id, txn_group in groupby(',
-            '                pending_transactions, key=lambda txn: txn.merchant_id',
-            '            ):',
+            '            response = self.llm.chat.completions.create(',
+            '                model=model,',
+            '                messages=messages,',
+            '                temperature=0.0',
         ],
         title: (
             <>
-                <code className="inline-code">itertools.groupby</code> without sorting causes incorrect grouping
+                Missing <code className="inline-code">max_tokens</code> limit may cause unbounded LLM cost spikes
             </>
         ),
         description: [
             <>
-                The code uses <code className="inline-code text-xs">itertools.groupby</code> on{' '}
-                <code className="inline-code text-xs">pending_transactions</code>, a queryset without a guaranteed order.{' '}
-                <code className="inline-code text-xs">groupby</code> only groups consecutive elements with the same key.
-                If transactions for the same merchant are not adjacent, they will be settled in separate batches, leading to
-                duplicate payouts.
+                The <code className="inline-code text-xs">chat.completions.create</code> call does not set a{' '}
+                <code className="inline-code text-xs">max_tokens</code> parameter. On large PRs with many changed files,
+                the model may generate very long responses, leading to unexpected API cost overruns and latency.
             </>,
             <>
-                Add a sort operation on <code className="inline-code text-xs">pending_transactions</code> by{' '}
-                <code className="inline-code text-xs">merchant_id</code> before the{' '}
-                <code className="inline-code text-xs">groupby</code> call. This ensures all transactions for the same
-                merchant are grouped together for a single settlement.
+                Add <code className="inline-code text-xs">max_tokens=4096</code> (or an env-configurable limit) to the
+                completion call. Consider also streaming the response to surface partial output faster.
             </>,
         ],
     },
     {
-        file: 'invoicing/services/export.py',
-        lineStart: 78,
-        lineEnd: 81,
+        file: 'backend/src/webhooks/core/github_client.py',
+        lineStart: 112,
+        lineEnd: 115,
         lines: [
-            '        result = subprocess.run(',
-            '            cmd,',
-            '            shell=True,',
-            '            capture_output=True',
+            '    def post_review_comment(self, repo, pr_number, commit_sha, body, path, line):',
+            '        url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"',
+            '        payload = {"body": body, "event": "COMMENT", "commit_id": commit_sha,',
+            '                   "comments": [{"path": path, "line": line, "body": body}]}',
         ],
-        title: (
-            <>
-                Potential command injection vulnerability with <code className="inline-code">shell=True</code>
-            </>
-        ),
+        title: 'Duplicate review body: top-level body echoes inline comment body',
         description: [
             <>
-                Using <code className="inline-code text-xs">subprocess.run</code> with{' '}
-                <code className="inline-code text-xs">shell=True</code> to generate invoice PDFs can lead to command
-                injection if the <code className="inline-code text-xs">cmd</code> variable includes merchant-supplied data
-                such as invoice numbers or company names.
+                The <code className="inline-code text-xs">body</code> field at the top level of the review payload
+                duplicates the inline comment body, causing the same feedback to appear twice in GitHub — once as a
+                review summary and once as an inline comment.
             </>,
             <>
-                Consider using <code className="inline-code text-xs">shell=False</code> and passing the command as a list
-                of arguments instead. This prevents shell interpretation of special characters in merchant-provided input.
+                Pass an empty string or a distinct summary to the top-level{' '}
+                <code className="inline-code text-xs">body</code> field and keep the detailed text only inside the{' '}
+                <code className="inline-code text-xs">comments</code> array.
             </>,
         ],
     },
     {
-        file: 'api/middleware/auth.py',
-        lineStart: 53,
-        lineEnd: 55,
+        file: 'backend/src/webhooks/core/orchestrator.py',
+        lineStart: 61,
+        lineEnd: 64,
         lines: [
-            '        api_key = request.headers.get("X-Api-Key")',
-            '        if api_key:',
-            '            merchant = db.query(Merchant).filter(Merchant.api_key == api_key).first()',
+            '        repo_path = tempfile.mkdtemp()',
+            '        subprocess.run(["git", "clone", pr.clone_url, repo_path], check=True)',
+            '        try:',
+            '            result = self._run_agents(repo_path, pr)',
         ],
-        title: 'API key comparison vulnerable to timing attacks',
+        title: 'Temporary clone directory not cleaned up on agent failure',
         description: [
             <>
-                The merchant API key is compared directly using <code className="inline-code text-xs">==</code> which is
-                vulnerable to timing attacks. An attacker could potentially recover the key character by character by
-                measuring response time differences, compromising merchant accounts and payment data.
+                When <code className="inline-code text-xs">_run_agents</code> raises an exception the{' '}
+                <code className="inline-code text-xs">tempfile.mkdtemp()</code> directory is never deleted, leaking
+                disk space on every failed review job.
             </>,
             <>
-                Use a constant-time comparison function like{' '}
-                <code className="inline-code text-xs">secrets.compare_digest()</code> to prevent timing-based side-channel
-                attacks on sensitive API key comparisons.
+                Wrap the clone lifecycle in a{' '}
+                <code className="inline-code text-xs">try / finally</code> block (or use{' '}
+                <code className="inline-code text-xs">tempfile.TemporaryDirectory</code> as a context manager) to
+                guarantee cleanup regardless of outcome.
             </>,
         ],
     },
@@ -97,11 +88,12 @@ export default function PRReview() {
             <div className="sm:col-span-3 flex flex-col justify-between py-2">
                 <div>
                     <h3 className="text-xl font-semibold tracking-tight text-gray-12">
-                        Inline review on pull requests
+                        Inline AI review on every pull request
                     </h3>
                     <p className="mt-2 font-medium text-base text-gray-10 leading-relaxed">
-                        Catch bugs, anti-patterns, and security vulnerabilities on every pull request. Powered by
-                        5,000+ deterministic rules along with our state-of-the-art AI review agent.
+                        AgenticPR posts inline review comments directly on GitHub PRs — catching security
+                        vulnerabilities, logic bugs, and best-practice violations powered by multi-agent
+                        LLM analysis.
                     </p>
                 </div>
             </div>
@@ -120,7 +112,7 @@ export default function PRReview() {
                         <div className="flex items-center">
                             <div className="flex-shrink-0 mr-3 mt-6 hidden sm:block">
                                 <div className="logo-square">
-                                    <DeepSourceLogo />
+                                    <AgenticPRLogo />
                                 </div>
                             </div>
                             <div className="flex flex-col items-center mr-3 flex-shrink-0">
@@ -133,7 +125,7 @@ export default function PRReview() {
                             </div>
                             <div className="flex-1 flex items-center justify-between mt-8">
                                 <div className="flex items-center gap-2 text-sm">
-                                    <span className="flex-shrink-0 font-semibold text-gray-12">deepsource</span>
+                                    <span className="flex-shrink-0 font-semibold text-gray-12">agenticpr</span>
                                     <span className="bot-badge border-gray-4 text-gray-8">bot</span>
                                     <span className="text-gray-8">reviewed</span>
                                     <span className="text-gray-8 underline flex-shrink-0 cursor-default">a few minutes ago</span>
@@ -151,14 +143,14 @@ export default function PRReview() {
                                 <div className="comment-box">
                                     <div className="comment-header bg-gray-2 border-gray-4">
                                         <div className="flex items-center gap-1.5 text-sm">
-                                            <span className="font-semibold text-gray-12">deepsource</span>
+                                            <span className="font-semibold text-gray-12">agenticpr</span>
                                             <span className="bot-badge border-gray-4 text-gray-8">bot</span>
                                             <span className="text-gray-8">left a comment</span>
                                         </div>
                                     </div>
                                     <div className="px-4 py-3 bg-gray-1">
                                         <p className="text-sm text-gray-11">
-                                            DeepSource reviewed changes in the commit range{' '}
+                                            AgenticPR reviewed changes in the commit range{' '}
                                             <code className="inline-code text-xs bg-gray-3">b76c8fa...63debb2</code> on this pull request.
                                             Below is the summary for the review, and you can see the individual issues we found as
                                             review comments.
@@ -197,12 +189,12 @@ export default function PRReview() {
                                                 <div className="flex gap-3">
                                                     <div className="flex-shrink-0 hidden sm:block">
                                                         <div className="logo-square">
-                                                            <DeepSourceLogo />
+                                                            <AgenticPRLogo />
                                                         </div>
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-1.5 text-sm">
-                                                            <span className="font-semibold text-gray-12">deepsource</span>
+                                                            <span className="font-semibold text-gray-12">agenticpr</span>
                                                             <span className="bot-badge border-gray-4 text-gray-8">bot</span>
                                                             <span className="text-gray-8 underline cursor-default">a few minutes ago</span>
                                                         </div>

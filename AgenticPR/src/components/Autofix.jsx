@@ -19,8 +19,8 @@ export default function Autofix() {
                 <div>
                     <h3 className="text-xl font-semibold tracking-tight text-gray-12">Autofix™</h3>
                     <p className="mt-2 font-medium text-base text-gray-10 leading-relaxed">
-                        Verified, pre-generated patches for most issues, so you can fix issues faster without
-                        breaking your flow.
+                        AgenticPR generates AI-powered fix suggestions for detected issues — reviewers can
+                        apply patches in one click without breaking their flow.
                     </p>
                 </div>
             </div>

@@ -1,19 +1,17 @@
-const dsLogo = "data:image/svg+xml,%3csvg%20width='28'%20height='32'%20viewBox='0%200%2028%2032'%20fill='none'%20xmlns='http://www.w3.org/2000/svg'%3e%3cpath%20d='M0%2032V0H11.2568C14.7546%200%2017.6898%200.763592%2020.1422%202.3315C22.5544%203.85916%2024.4036%205.86922%2025.6099%208.32144C26.8157%2010.7737%2027.4591%2013.3466%2027.4591%2016C27.4591%2018.6937%2026.856%2021.2661%2025.6099%2023.6786C24.4036%2026.1308%2022.5544%2028.1006%2020.1422%2029.6685C17.7296%2031.1962%2014.7546%2032%2011.2568%2032H2.09068C1.46057%2032%200.193974%2032%200%2032Z'%20fill='%23080808'/%3e%3cpath%20d='M4.54303%207.19617H15.9608C16.9257%207.19617%2017.7296%208%2017.7296%208.96479C17.7296%209.92958%2016.9257%2010.7339%2015.9608%2010.7339H4.54303V7.19617Z'%20fill='%233DDC97'/%3e%3cpath%20d='M4.54303%2021.1861H18.5339C19.4988%2021.1861%2020.3027%2021.9899%2020.3027%2022.9547C20.3027%2023.9195%2019.4988%2024.7238%2018.5339%2024.7238H4.54303V21.1861Z'%20fill='%23F12A1F'/%3e%3cpath%20d='M4.54303%2014.1911H12.4631C13.428%2014.1911%2014.2318%2014.995%2014.2318%2015.9598C14.2318%2016.9245%2013.428%2017.7289%2012.4631%2017.7289H4.54303V14.1911Z'%20fill='%23FFB400'/%3e%3c/svg%3e";
-
 const checks = [
-    'DeepSource: Python',
-    'DeepSource: JavaScript',
-    'DeepSource: Test coverage',
-    'DeepSource: Secrets',
-    'DeepSource: package.json',
+    'AgenticPR: Python · Flake8 + Bandit',
+    'AgenticPR: JavaScript · ESLint',
+    'AgenticPR: AI Code Review',
+    'AgenticPR: Secrets Detection',
+    'AgenticPR: Custom Checks',
 ];
 
 const statusTexts = [
-    'Analysis in progress...',
-    'Analysis in progress...',
-    'Analysis in progress...',
-    'Analysis in progress...',
-    'SCA in progress...',
+    'Linting in progress...',
+    'Linting in progress...',
+    'LLM analysis in progress...',
+    'Scanning for leaked keys...',
+    'Running .pr-reviewer.yml rules...',
 ];
 
 export default function PRGates() {
@@ -24,8 +22,8 @@ export default function PRGates() {
                 <div>
                     <h3 className="text-xl font-semibold tracking-tight text-gray-12">Pull request gates</h3>
                     <p className="mt-2 font-medium text-base text-gray-10 leading-relaxed">
-                        Define guardrails and prevent pull requests from merging when the PR quality is not
-                        satisfactory.
+                        Block merges automatically when AgenticPR detects critical issues — security
+                        vulnerabilities, linter failures, or custom team rule violations.
                     </p>
                 </div>
             </div>
@@ -103,7 +101,7 @@ export default function PRGates() {
                                                 <div className="w-2.5 h-2.5 rounded-full bg-[#bf8700]" />
                                             </div>
                                             <div className="w-5 h-5 rounded border border-[#d1d9e0] bg-white flex items-center justify-center shrink-0 overflow-hidden">
-                                                <img src={dsLogo} alt="DeepSource" className="w-3 h-3" />
+                                                <div className="w-3 h-3 rounded bg-juniper-7 flex items-center justify-center text-white font-bold" style={{fontSize:'6px'}}>PR</div>
                                             </div>
                                             <div className="flex-1 min-w-0 flex items-center gap-2">
                                                 <span className="font-medium text-[#1f2328] flex-shrink-0">{check}</span>

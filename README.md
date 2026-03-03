@@ -69,3 +69,6 @@ AgenticPR automates code review workflows by leveraging AI agents to analyze PRs
 
 
 
+To Run : 
+cd "c:\Users\Admin\OneDrive\Desktop\BackUp SDP Project\2526_SDP8_PullRequest_Intelligence_System\backend\src\webhooks"
+uvicorn main:app --reload --host 0.0.0.0 --port 8000

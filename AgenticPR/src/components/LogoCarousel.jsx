@@ -1,12 +1,12 @@
 const logos = [
-    { name: 'Uber', src: 'https://deepsource.com/img/logo/customer/uber.svg' },
-    { name: 'NASA', src: 'https://deepsource.com/img/logo/customer/nasa.svg' },
-    { name: 'Figma', src: 'https://deepsource.com/img/logo/customer/figma.svg' },
-    { name: 'Slack', src: 'https://deepsource.com/img/logo/customer/slack.svg' },
-    { name: 'Docusign', src: 'https://deepsource.com/img/logo/customer/docusign.svg' },
-    { name: '1Password', src: 'https://deepsource.com/img/logo/customer/1password.svg' },
-    { name: 'Juspay', src: 'https://deepsource.com/img/logo/customer/juspay.svg' },
-    { name: 'Akeso', src: 'https://deepsource.com/img/logo/customer/akeso.svg' },
+    { name: 'GitHub' },
+    { name: 'GitLab' },
+    { name: 'OpenAI' },
+    { name: 'Anthropic' },
+    { name: 'OpenRouter' },
+    { name: 'Bandit' },
+    { name: 'Flake8' },
+    { name: 'ESLint' },
 ];
 
 export default function LogoCarousel() {
@@ -21,13 +21,12 @@ export default function LogoCarousel() {
                 >
                     <div className="logo-carousel-track flex items-center h-full gap-[72px] w-max">
                         {allLogos.map((logo, index) => (
-                            <img
+                            <span
                                 key={`${logo.name}-${index}`}
-                                src={logo.src}
-                                alt={logo.name}
-                                className="h-8 w-auto opacity-50 hover:opacity-100 transition-opacity grayscale hover:grayscale-0"
-                                loading="lazy"
-                            />
+                                className="text-sm font-semibold tracking-wide text-gray-400 opacity-60 hover:opacity-100 transition-opacity whitespace-nowrap"
+                            >
+                                {logo.name}
+                            </span>
                         ))}
                     </div>
                     {/* Fade edges */}

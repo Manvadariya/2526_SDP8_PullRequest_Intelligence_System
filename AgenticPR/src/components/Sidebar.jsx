@@ -1,89 +1,113 @@
-import React from 'react';
-import { 
-  Home, 
-  Layers, 
-  FileText, 
-  Users, 
-  Settings, 
-  Globe, 
-  Lock, 
-  ChevronRight,
-  Search,
-  CheckCircle2, 
-  XCircle, 
-  GitPullRequest
-} from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
-
-const SidebarItem = ({ icon: Icon, label, path, badge }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const isActive = location.pathname === path;
-
-  return (
-    <div 
-      onClick={() => navigate(path)}
-      className={`flex items-center justify-between px-3 py-2 rounded-md mb-1 cursor-pointer transition-colors ${isActive ? 'bg-[#1f2937] text-white' : 'text-gray-400 hover:bg-[#1f2937] hover:text-white'}`}
-    >
-      <div className="flex items-center gap-3">
-        <Icon size={18} />
-        <span className="text-sm font-medium">{label}</span>
-      </div>
-      {badge && <span className="bg-[#238636] text-white text-xs px-1.5 rounded-full">{badge}</span>}
-    </div>
-  );
-};
-
-const FavoriteItem = ({ label, icon: Icon = Lock, status, onClick }) => {
-    return (
-      <div onClick={onClick} className={`flex items-center gap-3 px-3 py-2 rounded-md mb-1 cursor-pointer transition-colors text-gray-400 hover:bg-[#1f2937] hover:text-white`}>
-        {status === 'success' ? <CheckCircle2 size={16} className="text-[#238636]" /> : 
-         status === 'failure' ? <XCircle size={16} className="text-[#da3633]" /> :
-         <Icon size={16} className="shrink-0" />}
-        <span className="text-sm truncate">{label}</span>
-      </div>
-    );
-};
+import React, { useState } from 'react';
+import { NavLink, Link } from 'react-router-dom';
+import { Home, FolderOpen, FileText, BookOpen, HelpCircle, ChevronRight, LogOut, Plus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import ActivateRepoModal from './ActivateRepoModal';
 
 export default function Sidebar() {
-  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const [showActivateModal, setShowActivateModal] = useState(false);
   
+  // Use profile data if auth works, otherwise fallback
+  const username = user?.username || "shubham-vaishnav-13";
+  const avatarUrl = user?.avatar_url || "https://github.com/shubham-vaishnav-13.png";
+  const displayName = user?.name || "Shubham Vaishnav";
+
+  const mainNav = [
+    { name: 'Home', icon: Home, path: '/home' },
+    { name: 'Repositories', icon: FolderOpen, path: '/repositories' },
+  ];
+
   return (
-      <div className="w-64 border-r border-[#30363d] flex flex-col bg-[#0d1117] h-screen shrink-0 sticky top-0">
-        {/* Org Selector */}
-        <div className="p-4 flex items-center justify-between hover:bg-[#161b22] cursor-pointer transition-colors border-b border-[#30363d] shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center text-white text-xs font-bold">A</div>
-            <span className="font-semibold text-sm">Dashboard</span>
-            <ChevronRight size={14} className="rotate-90 text-gray-500" />
+    <div className="w-[260px] h-screen bg-[#0E1116] border-r border-[#30363D] flex flex-col shrink-0">
+      
+      {/* Top Section - User Context */}
+      <div className="pt-4 pb-2 px-3">
+        {/* User Dropdown trigger */}
+        <button className="w-full flex items-center justify-between p-2 rounded-md hover:bg-[#161B22] transition-colors group mb-3">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <img 
+              src={avatarUrl} 
+              alt={username} 
+              className="w-6 h-6 rounded-md object-cover"
+            />
+            <span className="text-[#E6EDF3] text-[14px] font-medium truncate">{username}</span>
           </div>
-        </div>
+          <ChevronRight size={14} className="text-[#8B949E] group-hover:text-[#E6EDF3] transition-colors" />
+        </button>
 
-        {/* Main Nav */}
-        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-          <button className="w-full flex items-center gap-2 border border-[#30363d] rounded-md px-3 py-1.5 text-sm text-gray-300 hover:bg-[#1f2937] hover:border-gray-500 transition-all mb-6">
-            <Layers size={16} />
-            <span>New Scan</span>
+        {/* Action Button */}
+        <button 
+          onClick={() => setShowActivateModal(true)}
+          className="w-full flex items-center gap-2 p-2 rounded-md text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#161B22] transition-colors mb-2"
+        >
+          <Plus size={16} />
+          <span className="text-[13px] font-medium">Activate new repository</span>
+        </button>
+      </div>
+
+      <ActivateRepoModal 
+        isOpen={showActivateModal} 
+        onClose={() => setShowActivateModal(false)} 
+      />
+
+      {/* Main Navigation */}
+      <nav className="flex-1 px-3 py-2 space-y-0.5 mt-2">
+        {mainNav.map((item) => (
+          <NavLink
+            key={item.name}
+            to={item.path}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                isActive
+                  ? 'bg-[#161B22] text-[#E6EDF3]'
+                  : 'text-[#8B949E] hover:bg-[#161B22] hover:text-[#E6EDF3]'
+              }`
+            }
+          >
+            <item.icon size={16} />
+            {item.name}
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Footer Navigation */}
+      <div className="px-3 py-4 border-t border-[#30363D]">
+        <nav className="space-y-0.5 mb-4">
+          <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-md text-[13px] text-[#8B949E] hover:bg-[#161B22] hover:text-[#E6EDF3] transition-colors">
+            <BookOpen size={16} />
+            Read documentation
+          </a>
+          <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-md text-[13px] text-[#8B949E] hover:bg-[#161B22] hover:text-[#E6EDF3] transition-colors">
+            <HelpCircle size={16} />
+            Contact support
+          </a>
+        </nav>
+
+        {/* User Profile Mini Footer */}
+        <div className="flex items-center justify-between px-3 mt-4">
+           <div className="flex items-center gap-2 overflow-hidden">
+            <img 
+              src={avatarUrl} 
+              alt={username} 
+              className="w-5 h-5 rounded-full object-cover"
+            />
+            <span className="text-[#8B949E] text-[13px] truncate">{displayName}</span>
+          </div>
+          
+          <button 
+            onClick={logout}
+            className="text-[#8B949E] hover:text-[#f85149] transition-colors p-1 flex-shrink-0"
+            title="Log out"
+          >
+            <LogOut size={14} />
           </button>
-
-          <div className="mb-6">
-            <SidebarItem icon={Home} label="Home" path="/" />
-            <SidebarItem icon={Layers} label="Repositories" path="/repositories" />
-            <SidebarItem icon={FileText} label="Reports" path="/reports" />
-            <SidebarItem icon={Users} label="Members" path="/members" />
-            <SidebarItem icon={Settings} label="Settings" path="/settings" />
-          </div>
-
-          <div className="mb-2 px-3 flex items-center justify-between text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <span>Recent Scans</span>
-            <div className="h-[1px] bg-[#30363d] flex-1 ml-3"></div>
-          </div>
-
-          <div className="space-y-1">
-             {/* Use navigate to /scan which defaults to latest scan. */}
-            <FavoriteItem label="Latest Job" onClick={() => navigate('/scan')} status="success" />
-          </div>
+        </div>
+        
+        <div className="px-3 mt-6 text-[11px] text-[#8B949E]">
+          © 2026 AgenticPR
         </div>
       </div>
+    </div>
   );
 }

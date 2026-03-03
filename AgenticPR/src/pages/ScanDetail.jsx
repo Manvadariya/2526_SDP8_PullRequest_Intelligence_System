@@ -16,9 +16,10 @@ import {
   MoreHorizontal,
   GitPullRequest
 } from 'lucide-react';
-import { useParams, Link } from 'react-router-dom';
-
-const API_BASE = 'http://localhost:8000';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useJobs } from '../hooks/useApiCache';
+import { API_BASE } from '../config';
 
 const Tab = ({ label, active, onClick }) => (
   <div onClick={onClick} className={`px-4 py-3 text-sm font-medium cursor-pointer border-b-2 transition-colors ${active ? 'border-[#238636] text-white' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-700'}`}>
@@ -38,7 +39,7 @@ const ReportRow = ({ label, count, status }) => (
   </div>
 );
 
-const MetricBar = ({ label, passed, failed, color }) => (
+const MetricBar = ({ label, passed, failed }) => (
   <div className="flex items-center justify-between bg-[#161b22] border border-[#30363d] rounded-md px-3 py-2 mb-2">
     <div className="flex items-center gap-2">
       <Layers size={16} className="text-gray-400" />
@@ -58,51 +59,47 @@ export default function ScanDetail() {
   const [jobDetails, setJobDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const params = useParams();
+  const [searchParams] = useSearchParams();
+  const { authFetch } = useAuth();
+  const { data: jobsList = [], isLoading: jobsListLoading } = useJobs();
   
   useEffect(() => {
-    // If we have an ID in the URL, use it. Otherwise fetch list and use first.
-    if (params.scanId) {
-        fetchJob(params.scanId);
-    } else {
-        fetch(`${API_BASE}/api/jobs`)
+    const fetchJobData = (id) => {
+      setLoading(true);
+      authFetch(`/api/jobs/${id}`)
         .then(res => res.json())
         .then(data => {
-            if (Array.isArray(data) && data.length > 0) {
-                // Default to latest job
-                const latest = data[0]; 
-                fetchJob(latest.id);
-            } else {
-                setLoading(false);
-            }
+            const parsedResults = (data.results || []).map(r => ({
+                ...r,
+                output: typeof r.output_json === 'string' ? JSON.parse(r.output_json) : r.output_json
+            }));
+            setSelectedJob(data.job);
+            setJobDetails({ ...data.job, results: parsedResults });
+            setLoading(false);
         })
         .catch(err => {
-            console.error("Failed to fetch jobs list:", err);
+            console.error("Failed to fetch job details", err);
             setLoading(false);
         });
+    };
+
+    if (params.id) {
+        fetchJobData(params.id);
+    } else if (!jobsListLoading) {
+        if (jobsList.length > 0) {
+            const repoFilter = searchParams.get('repo');
+            let target;
+            if (repoFilter) {
+                target = jobsList.find(j => j.repo_full_name === repoFilter) || jobsList[0];
+            } else {
+                target = jobsList[0];
+            }
+            fetchJobData(target.id);
+        } else {
+            setLoading(false);
+        }
     }
-  }, [params.scanId]);
-
-  const fetchJob = (id) => {
-    setLoading(true);
-    fetch(`${API_BASE}/api/jobs/${id}`)
-      .then(res => res.json())
-      .then(data => {
-          // Parse any JSON strings in results
-          const parsedResults = (data.results || []).map(r => ({
-              ...r,
-              output: typeof r.output_json === 'string' ? JSON.parse(r.output_json) : r.output_json
-          }));
-          
-          setSelectedJob(data.job);
-          setJobDetails({ ...data.job, results: parsedResults });
-          setLoading(false);
-      })
-      .catch(err => {
-          console.error("Failed to fetch job details", err);
-          setLoading(false);
-      });
-  };
-
+  }, [params.id, authFetch, searchParams, jobsList, jobsListLoading]);
 
   const getIssues = () => {
       if (!jobDetails?.results) return [];

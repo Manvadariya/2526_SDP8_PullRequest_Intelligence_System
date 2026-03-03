@@ -6,7 +6,7 @@ const categories = [
     { name: 'Coverage', issues: 11, grade: 'B', gradeColor: '#F6D87C', gradeBorder: '#FBEFC8' },
 ];
 
-function GradeBadge({ grade, color, borderColor }) {
+function GradeBadge({ grade, color }) {
     const gradeIdx = { A: 0, B: 1, C: 2, D: 3 };
     const idx = gradeIdx[grade] || 0;
 

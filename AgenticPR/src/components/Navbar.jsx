@@ -1,16 +1,15 @@
 import { useState } from 'react';
 
 const navLinks = [
-    { label: 'Benchmarks', href: '/benchmarks' },
-    { label: 'Customers', href: '/customers' },
-    { label: 'Pricing', href: '/pricing' },
-    { label: 'Docs', href: 'https://docs.deepsource.com', external: true },
+    { label: 'Features', href: '#features' },
+    { label: 'How It Works', href: '#how-it-works' },
+    { label: 'Docs', href: '/docs' },
 ];
 
 const resourceLinks = [
-    { label: 'Blog', href: 'https://deepsource.com/blog' },
-    { label: 'Changelog', href: 'https://deepsource.com/changelog' },
-    { label: 'Learning Center', href: 'https://deepsource.com/learn' },
+    { label: 'GitHub', href: 'https://github.com' },
+    { label: 'Changelog', href: '/changelog' },
+    { label: 'About', href: '/about' },
 ];
 
 export default function Navbar() {
@@ -33,13 +32,9 @@ export default function Navbar() {
             >
                 {/* Logo */}
                 <div className="flex flex-shrink-0">
-                    <a href="/" className="-m-1.5 p-1.5">
-                        <span className="sr-only">DeepSource</span>
-                        <img
-                            className="h-[1.583rem] w-auto flex-shrink-0"
-                            src="https://deepsource.com/_nuxt/wordmark-light.CU2fWIAi.svg"
-                            alt="DeepSource"
-                        />
+                    <a href="/" className="-m-1.5 p-1.5 flex items-center gap-2.5">
+                        <span className="sr-only">AgenticPR</span>
+                        <span className="font-bold text-[1.1rem] text-gray-12 tracking-tight">AgenticPR</span>
                     </a>
                 </div>
 
@@ -145,22 +140,22 @@ export default function Navbar() {
                 {/* Desktop CTA buttons */}
                 <div className="hidden lg:flex lg:flex-1 lg:justify-end gap-x-[1.055rem]">
                     <a
-                        href="https://app.deepsource.com/login"
+                        href="/login"
                         className="text-[0.923rem] font-medium leading-5 mr-[0.528rem]"
                     >
                         Log in
                     </a>
                     <a
-                        href="https://app.deepsource.com/signup"
+                        href="/signup"
                         className="bg-juniper-1 hover:bg-gray-2 ring-gray-6 text-[0.923rem] font-medium leading-5 rounded px-[0.659rem] py-[0.263rem] -my-[0.263rem] shadow-sm ring-1 ring-inset"
                     >
                         Sign up
                     </a>
                     <a
-                        href="/contact/sales"
+                        href="/login"
                         className="text-[0.923rem] font-semibold leading-5 rounded px-[0.659rem] py-[0.263rem] -my-[0.27rem] shadow-sm ring-1 ring-inset bg-juniper-2 hover:bg-juniper-3 ring-juniper-7 text-juniper-11"
                     >
-                        Contact Sales
+                        Get Started
                     </a>
                 </div>
             </nav>
@@ -197,20 +192,20 @@ export default function Navbar() {
                         </a>
                     ))}
                     <div className="pt-[1.055rem] border-t border-gray-4 flex flex-col gap-[0.791rem]">
-                        <a href="https://app.deepsource.com/login" className="text-[0.923rem] font-medium">
+                        <a href="/login" className="text-[0.923rem] font-medium">
                             Log in
                         </a>
                         <a
-                            href="https://app.deepsource.com/signup"
+                            href="/signup"
                             className="text-[0.923rem] font-medium text-center bg-juniper-1 ring-gray-6 rounded px-[0.659rem] py-[0.528rem] shadow-sm ring-1 ring-inset"
                         >
                             Sign up
                         </a>
                         <a
-                            href="/contact/sales"
+                            href="/signup"
                             className="text-[0.923rem] font-semibold text-center rounded px-[0.659rem] py-[0.528rem] shadow-sm ring-1 ring-inset bg-juniper-2 ring-juniper-9 text-juniper-11"
                         >
-                            Contact Sales
+                            Get Started
                         </a>
                     </div>
                 </div>

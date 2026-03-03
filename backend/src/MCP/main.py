@@ -14,15 +14,15 @@ import anyio
 
 load_dotenv()
 
+# Provider-aware assertions
+provider = os.getenv("LLM_PROVIDER", "openrouter")
+if provider == "openrouter":
+    or_key = os.getenv("OPENROUTER_API_KEY", "")
+    assert or_key, "Error: OPENROUTER_API_KEY cannot be empty when LLM_PROVIDER=openrouter. Update .env"
+else:
+    print(f"🔧 Using LLM provider: {provider} (skipping OpenRouter key check)")
 
-or_key = os.getenv("OPENROUTER_API_KEY", "")
-assert or_key, "Error: OPENROUTER_API_KEY cannot be empty. Update .env"
-
-
-# Check Environment
-
-assert hf_token, "Error: HF_TOKEN cannot be empty. Update .env"
-
+github_token = os.getenv("GITHUB_TOKEN", "")
 assert github_token, "Error: GITHUB_TOKEN cannot be empty. Update .env"
 
 async def main():
@@ -36,7 +36,13 @@ async def main():
             "command": "python",
             "args": ["mcp_server.py"]
         },
-        # 2. Official GitHub Server (Node.js via npx)
+        # 2. PR Review Tools Server (Python) — lint, security, GitHub, file reading
+        {
+            "name": "pr_review",
+            "command": "python",
+            "args": ["pr_review_server.py"]
+        },
+        # 3. Official GitHub Server (Node.js via npx)
         {
             "name": "official_github",
             "command": "npx", 

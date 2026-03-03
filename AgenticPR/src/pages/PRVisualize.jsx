@@ -1,112 +1,77 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-
-const MOCK_PRS = [
-  {
-    id: 1,
-    number: 247,
-    title: "feat: add user authentication with OAuth2",
-    author: "sarah-dev",
-    repo: "frontend-app",
-    status: "changes_requested",
-    verdict: "REQUEST_CHANGES",
-    riskLevel: "high",
-    riskColor: "text-red-400",
-    riskBg: "bg-red-400/10",
-    filesChanged: 12,
-    additions: 342,
-    deletions: 45,
-    reviewTime: "47s",
-    createdAt: "2 hours ago",
-    issues: [
-      { type: "Security", severity: "High", description: "Unsanitized user input in SQL query", line: 42 },
-      { type: "Bug Risk", severity: "Medium", description: "Missing null check on response.data", line: 78 },
-    ],
-    agents: ["Sentinel", "Architect", "Optimizer", "Mentor"],
-  },
-  {
-    id: 2,
-    number: 246,
-    title: "fix: resolve memory leak in WebSocket handler",
-    author: "mike-eng",
-    repo: "api-gateway",
-    status: "approved",
-    verdict: "APPROVE",
-    riskLevel: "low",
-    riskColor: "text-green-400",
-    riskBg: "bg-green-400/10",
-    filesChanged: 3,
-    additions: 28,
-    deletions: 15,
-    reviewTime: "23s",
-    createdAt: "5 hours ago",
-    issues: [],
-    agents: ["Sentinel", "Optimizer"],
-  },
-  {
-    id: 3,
-    number: 245,
-    title: "refactor: migrate database queries to prepared statements",
-    author: "alex-sec",
-    repo: "api-gateway",
-    status: "approved",
-    verdict: "APPROVE",
-    riskLevel: "low",
-    riskColor: "text-green-400",
-    riskBg: "bg-green-400/10",
-    filesChanged: 8,
-    additions: 156,
-    deletions: 132,
-    reviewTime: "38s",
-    createdAt: "1 day ago",
-    issues: [],
-    agents: ["Sentinel", "Architect", "Mentor"],
-  },
-  {
-    id: 4,
-    number: 244,
-    title: "feat: implement real-time notification system",
-    author: "lisa-dev",
-    repo: "frontend-app",
-    status: "comment",
-    verdict: "COMMENT",
-    riskLevel: "medium",
-    riskColor: "text-amber-300",
-    riskBg: "bg-amber-300/10",
-    filesChanged: 7,
-    additions: 203,
-    deletions: 12,
-    reviewTime: "52s",
-    createdAt: "1 day ago",
-    issues: [
-      { type: "Performance", severity: "Medium", description: "N+1 query pattern detected in notification fetch", line: 156 },
-    ],
-    agents: ["Optimizer", "Architect", "Mentor"],
-  },
-  {
-    id: 5,
-    number: 243,
-    title: "chore: update dependencies and fix security vulnerabilities",
-    author: "bot-renovate",
-    repo: "ml-pipeline",
-    status: "approved",
-    verdict: "APPROVE",
-    riskLevel: "low",
-    riskColor: "text-green-400",
-    riskBg: "bg-green-400/10",
-    filesChanged: 2,
-    additions: 89,
-    deletions: 87,
-    reviewTime: "15s",
-    createdAt: "2 days ago",
-    issues: [],
-    agents: ["Sentinel"],
-  },
-];
+import { useAuth } from "../context/AuthContext";
+import { useJobs } from "../hooks/useApiCache";
 
 export const PRVisualize = () => {
-  const [selected, setSelected] = useState(MOCK_PRS[0]);
+  const { authFetch } = useAuth();
+  const { data: jobsList = [], isLoading: jobsLoading } = useJobs();
+  const [prs, setPrs] = useState([]);
+  const [selected, setSelected] = useState(null);
   const [viewMode, setViewMode] = useState("list");
+  const [loading, setLoading] = useState(true);
+
+  // Once jobs are cached, fetch details for each (these get cached individually too)
+  useEffect(() => {
+    if (jobsLoading) return;
+    if (jobsList.length === 0) { setLoading(false); return; }
+
+    const fetchDetails = async () => {
+      try {
+        const prData = await Promise.all(
+          jobsList.slice(0, 20).map(async (job) => {
+            try {
+              const detailRes = await authFetch(`/api/jobs/${job.id}`);
+              const detail = await detailRes.json();
+              const results = (detail.results || []).map(r => ({
+                ...r,
+                output: typeof r.output_json === 'string' ? JSON.parse(r.output_json) : r.output_json
+              }));
+
+              const reviewResult = results.find(r => r.agent_name === 'reviewer' || r.agent_name === 'mcp_reviewer');
+              const output = reviewResult?.output || {};
+
+              const verdict = output.verdict || (job.status === 'success' ? 'APPROVE' : 'COMMENT');
+              const inlineComments = output.inline_comments || 0;
+              const filesChanged = output.file_count || output.files_reviewed || 0;
+
+              return {
+                id: job.id,
+                number: job.pr_number,
+                title: `PR #${job.pr_number}`,
+                author: job.repo_full_name?.split('/')[0] || 'unknown',
+                repo: job.repo_full_name || 'unknown',
+                status: job.status,
+                verdict: verdict,
+                riskLevel: verdict === 'REQUEST_CHANGES' ? 'high' : verdict === 'COMMENT' && inlineComments > 0 ? 'medium' : 'low',
+                riskColor: verdict === 'REQUEST_CHANGES' ? 'text-red-400' : verdict === 'COMMENT' && inlineComments > 0 ? 'text-amber-300' : 'text-green-400',
+                riskBg: verdict === 'REQUEST_CHANGES' ? 'bg-red-400/10' : verdict === 'COMMENT' && inlineComments > 0 ? 'bg-amber-300/10' : 'bg-green-400/10',
+                filesChanged: filesChanged,
+                additions: 0,
+                deletions: 0,
+                reviewTime: 'N/A',
+                createdAt: job.created_at ? new Date(job.created_at).toLocaleString() : 'unknown',
+                issues: inlineComments,
+                commitSha: job.commit_sha,
+                agents: output.mode ? [`MCP (${output.mode})`] : ['Apex Reviewer'],
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        const validPrs = prData.filter(Boolean).sort((a, b) => b.number - a.number);
+        setPrs(validPrs);
+        if (validPrs.length > 0) setSelected(validPrs[0]);
+      } catch (err) {
+        console.error('Failed to fetch PR reviews:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDetails();
+  }, [jobsList, jobsLoading, authFetch]);
 
   const getVerdictStyles = (verdict) => {
     switch (verdict) {
@@ -134,6 +99,18 @@ export const PRVisualize = () => {
           </p>
         </div>
 
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-neutral-400 ml-3">Loading reviews...</p>
+          </div>
+        ) : prs.length === 0 ? (
+          <div className="text-center py-20 text-neutral-400">
+            <p className="text-lg">No PR reviews found yet.</p>
+            <p className="text-sm mt-2">Reviews will appear here when PRs are analyzed by AgenticPR.</p>
+          </div>
+        ) : (
+        <>
         {/* Stats Overview */}
         <div className="border-b-stone-50 border-l-stone-50 border-r-stone-50 box-border caret-transparent gap-x-4 grid grid-cols-2 outline-transparent gap-y-4 border-t-white/10 border-t border-b-white/10 border-b py-6 mb-8 md:grid-cols-4">
           <div className="box-border caret-transparent outline-transparent">
@@ -141,7 +118,7 @@ export const PRVisualize = () => {
               Total Reviews
             </span>
             <span className="text-[28px] font-[538] box-border caret-transparent tracking-[-0.5px] outline-transparent">
-              {MOCK_PRS.length}
+              {prs.length}
             </span>
           </div>
           <div className="box-border caret-transparent outline-transparent">
@@ -149,7 +126,7 @@ export const PRVisualize = () => {
               Approved
             </span>
             <span className="text-green-400 text-[28px] font-[538] box-border caret-transparent tracking-[-0.5px] outline-transparent">
-              {MOCK_PRS.filter((p) => p.verdict === "APPROVE").length}
+              {prs.filter((p) => p.verdict === "APPROVE").length}
             </span>
           </div>
           <div className="box-border caret-transparent outline-transparent">
@@ -157,21 +134,21 @@ export const PRVisualize = () => {
               Changes Requested
             </span>
             <span className="text-red-400 text-[28px] font-[538] box-border caret-transparent tracking-[-0.5px] outline-transparent">
-              {MOCK_PRS.filter((p) => p.verdict === "REQUEST_CHANGES").length}
+              {prs.filter((p) => p.verdict === "REQUEST_CHANGES").length}
             </span>
           </div>
           <div className="box-border caret-transparent outline-transparent">
             <span className="text-neutral-500 text-[13px] box-border caret-transparent block tracking-[-0.13px] leading-[19.5px] outline-transparent mb-1">
-              Avg Review Time
+              Repos Covered
             </span>
             <span className="text-[28px] font-[538] box-border caret-transparent tracking-[-0.5px] outline-transparent">
-              35s
+              {new Set(prs.map(p => p.repo)).size}
             </span>
           </div>
         </div>
 
-        {/* View Toggle */}
-        <div className="items-center box-border caret-transparent flex outline-transparent gap-x-1 mb-6">
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-2 mb-6">
           <button
             onClick={() => setViewMode("list")}
             className={`text-[13px] font-[510] items-center box-border caret-transparent flex h-8 justify-center outline-transparent text-nowrap px-3 rounded-lg ${viewMode === "list" ? "text-stone-50 bg-zinc-800 border border-zinc-700 border-solid" : "text-neutral-400 bg-transparent"}`}
@@ -189,7 +166,7 @@ export const PRVisualize = () => {
         {viewMode === "list" ? (
           /* List View */
           <div className="box-border caret-transparent outline-transparent">
-            {MOCK_PRS.map((pr) => {
+            {prs.map((pr) => {
               const verdictStyle = getVerdictStyles(pr.verdict);
               return (
                 <div
@@ -321,7 +298,7 @@ export const PRVisualize = () => {
                   Issues Found
                 </span>
                 <span className="text-[21px] font-[510] box-border caret-transparent tracking-[-0.37px] outline-transparent">
-                  {selected.issues.length}
+                  {typeof selected.issues === 'number' ? selected.issues : selected.issues?.length || 0}
                 </span>
               </div>
             </div>
@@ -337,50 +314,23 @@ export const PRVisualize = () => {
                     key={agent}
                     className="text-slate-300 text-[13px] font-[510] items-center bg-zinc-800 box-border caret-transparent flex h-7 outline-transparent gap-x-1.5 text-nowrap border border-zinc-700 px-2.5 rounded-md border-solid"
                   >
-                    {agent === "Sentinel" && "🛡️"}
-                    {agent === "Architect" && "🏛️"}
-                    {agent === "Optimizer" && "⚡"}
-                    {agent === "Mentor" && "🎓"}
-                    {" "}{agent}
+                    🤖 {agent}
                   </span>
                 ))}
               </div>
             </div>
 
-            {/* Issues Table */}
-            {selected.issues.length > 0 && (
+            {/* Issues Summary */}
+            {(typeof selected.issues === 'number' ? selected.issues > 0 : selected.issues?.length > 0) && (
               <div className="box-border caret-transparent outline-transparent mb-8">
                 <h3 className="text-[15px] font-[510] box-border caret-transparent tracking-[-0.165px] outline-transparent mb-3">
                   Issues Found
                 </h3>
-                <div className="box-border caret-transparent outline-transparent border border-white/10 rounded-lg border-solid overflow-hidden">
-                  {/* Table Header */}
-                  <div className="items-center bg-zinc-900/60 box-border caret-transparent gap-x-4 grid grid-cols-[80px_80px_1fr_60px] outline-transparent p-3 border-b border-white/10 border-solid">
-                    <span className="text-neutral-500 text-[12px] font-[510] box-border caret-transparent tracking-[-0.12px] outline-transparent">Type</span>
-                    <span className="text-neutral-500 text-[12px] font-[510] box-border caret-transparent tracking-[-0.12px] outline-transparent">Severity</span>
-                    <span className="text-neutral-500 text-[12px] font-[510] box-border caret-transparent tracking-[-0.12px] outline-transparent">Description</span>
-                    <span className="text-neutral-500 text-[12px] font-[510] box-border caret-transparent tracking-[-0.12px] outline-transparent">Line</span>
-                  </div>
-                  {/* Table Rows */}
-                  {selected.issues.map((issue, idx) => (
-                    <div
-                      key={idx}
-                      className="items-center box-border caret-transparent gap-x-4 grid grid-cols-[80px_80px_1fr_60px] outline-transparent p-3 border-b border-white/5 border-solid last:border-b-0"
-                    >
-                      <span className="text-slate-300 text-[13px] box-border caret-transparent tracking-[-0.13px] outline-transparent">
-                        {issue.type === "Security" && "🔒"} {issue.type === "Bug Risk" && "🐛"} {issue.type === "Performance" && "⚡"} {issue.type}
-                      </span>
-                      <span className={`text-[13px] font-[510] box-border caret-transparent tracking-[-0.13px] outline-transparent ${issue.severity === "High" ? "text-red-400" : issue.severity === "Medium" ? "text-amber-300" : "text-green-400"}`}>
-                        {issue.severity}
-                      </span>
-                      <span className="text-neutral-400 text-[13px] box-border caret-transparent tracking-[-0.13px] leading-[19.5px] outline-transparent">
-                        {issue.description}
-                      </span>
-                      <span className="text-neutral-500 text-[13px] box-border caret-transparent tracking-[-0.13px] outline-transparent font-berkeley_mono">
-                        L{issue.line}
-                      </span>
-                    </div>
-                  ))}
+                <div className="box-border caret-transparent outline-transparent border border-white/10 rounded-lg border-solid overflow-hidden p-4">
+                  <p className="text-neutral-400 text-[13px]">
+                    {typeof selected.issues === 'number' ? selected.issues : selected.issues?.length || 0} inline comment(s) posted on this PR review.
+                    <Link to={`/scan/${selected.id}`} className="text-blue-400 hover:underline ml-2">View full scan details →</Link>
+                  </p>
                 </div>
               </div>
             )}
@@ -423,17 +373,15 @@ export const PRVisualize = () => {
                       {selected.riskLevel === "high" ? "Medium" : "Low"}
                     </span>
                   </div>
-                  {selected.issues.length > 0 && (
+                  {(typeof selected.issues === 'number' ? selected.issues > 0 : selected.issues?.length > 0) && (
                     <>
                       <div className="bg-zinc-800 box-border caret-transparent shrink-0 h-px outline-transparent w-full my-3 rounded-full"></div>
-                      {selected.issues.map((issue, i) => (
-                        <div key={i} className={`${issue.severity === "High" ? "text-red-400" : "text-amber-300"} box-border caret-transparent outline-transparent mt-1`}>
-                          {issue.severity === "High" ? "🔴" : "🟡"} [{issue.type}] {issue.description} at line {issue.line}
-                        </div>
-                      ))}
+                      <div className="text-amber-300 box-border caret-transparent outline-transparent mt-1">
+                        ⚠️ {typeof selected.issues === 'number' ? selected.issues : selected.issues?.length || 0} issue(s) found — see inline comments on the PR.
+                      </div>
                     </>
                   )}
-                  {selected.issues.length === 0 && (
+                  {(typeof selected.issues === 'number' ? selected.issues === 0 : !selected.issues?.length) && (
                     <>
                       <div className="bg-zinc-800 box-border caret-transparent shrink-0 h-px outline-transparent w-full my-3 rounded-full"></div>
                       <div className="text-green-400 box-border caret-transparent outline-transparent">
@@ -446,7 +394,11 @@ export const PRVisualize = () => {
             </div>
           </div>
         )}
+        </>
+        )}
       </div>
     </section>
   );
 };
+
+export default PRVisualize;
