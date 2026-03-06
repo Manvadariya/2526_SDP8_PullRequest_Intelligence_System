@@ -37,7 +37,7 @@ class FeedbackManager:
                     f.seek(0)
                     json.dump(data, f, indent=2)
             except Exception as e:
-                print(f"⚠️ Failed to log feedback: {e}")
+                print(f" Failed to log feedback: {e}")
 
     def get_negative_constraints(self) -> str:
         """
@@ -61,7 +61,7 @@ class FeedbackManager:
             # Construct a simple constraint message
             # "Users have flagged 3 false positives in 'auth.py'. Be extra conservative."
             files = set(e["file"] for e in false_positives)
-            return f"\n\n> ⚠️ **FEEDBACK HISTORY**: Users have previously flagged valid code as errors in these files: {', '.join(files)}. Be extremely conservative when reviewing them."
+            return f"\n\n>  **FEEDBACK HISTORY**: Users have previously flagged valid code as errors in these files: {', '.join(files)}. Be extremely conservative when reviewing them."
             
         except Exception:
             return ""

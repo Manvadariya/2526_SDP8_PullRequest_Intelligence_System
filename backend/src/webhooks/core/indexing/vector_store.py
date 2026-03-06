@@ -86,21 +86,39 @@ class CodeVectorStore:
         return str(uuid.UUID(hash_val))
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using GitHub Models API."""
-        # GitHub API has rate limits, so simple retry logic is good practice
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = self.ai_client.embeddings.create(
-                    input=texts,
-                    model=self.model_name
-                )
-                return [data.embedding for data in response.data]
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise e
-                time.sleep(2 * (attempt + 1))
-        return []
+        """Generate embeddings using GitHub Models API in batches."""
+        max_retries = 5
+        all_embeddings = []
+        batch_size = 1 # Process one by one to avoid 8k token limits across chunks
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            for attempt in range(max_retries):
+                try:
+                    response = self.ai_client.embeddings.create(
+                        input=batch,
+                        model=self.model_name
+                    )
+                    # Extend properly since data comes sorted by default
+                    all_embeddings.extend([data.embedding for data in response.data])
+                    break
+                except Exception as e:
+                    error_str = str(e).lower()
+                    is_rate_limit = "too many requests" in error_str or "rate limit" in error_str or "429" in error_str
+                    if attempt == max_retries - 1:
+                        raise e
+                    # Exponential backoff: 2s, 6s, 14s, 30s
+                    wait_time = min(30, 2 * (2 ** attempt))
+                    if is_rate_limit:
+                        wait_time = min(60, 5 * (2 ** attempt))  # Longer waits for rate limits
+                        print(f"  [VectorStore] Rate limited (attempt {attempt+1}/{max_retries}). Waiting {wait_time}s...")
+                    else:
+                        print(f"  [VectorStore] Embedding error (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+            # Small delay between batches to avoid rate limits
+            if i + batch_size < len(texts):
+                time.sleep(0.5)
+        return all_embeddings
 
     def index_file(self, file_path: str, code_content: Optional[str] = None) -> int:
         """
@@ -228,5 +246,5 @@ class CodeVectorStore:
             )
             return True
         except Exception as e:
-            print(f"⚠️ Failed to delete file {file_path} from Qdrant: {e}")
+            print(f" Failed to delete file {file_path} from Qdrant: {e}")
             return False

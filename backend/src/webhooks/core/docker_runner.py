@@ -84,9 +84,9 @@ class DockerRunner:
             if stderr:
                 err_text = stderr.decode(errors="replace")
                 if err_text.strip():
-                    print(f"⚠️ Exec stderr: {err_text[:500]}")
+                    print(f" Exec stderr: {err_text[:500]}")
 
-            print(f"✅ Checks finished (exit code {process.returncode})")
+            print(f" Checks finished (exit code {process.returncode})")
 
             # 3. Read Results from Repo Dir (Host side)
             # The script writes lint.json and security.json to the current directory (container_workdir)
@@ -101,7 +101,7 @@ class DockerRunner:
             }
 
         except Exception as e:
-            print(f"❌ Docker execution error: {e}")
+            print(f" Docker execution error: {e}")
             return DockerRunner._default_results(str(e))
 
     # ── Service Management ─────────────────────────────────────
@@ -126,22 +126,22 @@ class DockerRunner:
                 return True
             else:
                 err = stderr.decode(errors="replace").strip()
-                print(f"❌ Docker daemon not reachable (exit {proc.returncode}):")
+                print(f" Docker daemon not reachable (exit {proc.returncode}):")
                 print(f"   {err[:200]}")
                 print("   💡 Ensure Docker Desktop is running, or start the Docker service.")
                 DockerRunner._docker_available = False
                 return False
         except FileNotFoundError:
-            print(f"❌ Docker executable not found at: {DockerRunner.DOCKER_EXE}")
+            print(f" Docker executable not found at: {DockerRunner.DOCKER_EXE}")
             print("   💡 Install Docker or set DOCKER_EXECUTABLE_PATH in your .env file.")
             DockerRunner._docker_available = False
             return False
         except asyncio.TimeoutError:
-            print("❌ Docker daemon check timed out (15s). Is Docker Desktop starting up?")
+            print(" Docker daemon check timed out (15s). Is Docker Desktop starting up?")
             DockerRunner._docker_available = False
             return False
         except Exception as e:
-            print(f"❌ Docker availability check failed: {e}")
+            print(f" Docker availability check failed: {e}")
             DockerRunner._docker_available = False
             return False
 
@@ -166,7 +166,7 @@ class DockerRunner:
         # Mount host workspace to /workspace in container
         workspace_mount = getattr(app_config, "WORKSPACE_MOUNT_PATH", "")
         if not workspace_mount:
-            print("❌ WORKSPACE_MOUNT_PATH not set in config.")
+            print(" WORKSPACE_MOUNT_PATH not set in config.")
             return False
             
         # Ensure dir exists on host
@@ -179,7 +179,7 @@ class DockerRunner:
         if len(workspace_mount) > 1 and workspace_mount[1] == ':':
             workspace_mount = workspace_mount[0].upper() + workspace_mount[1:]
 
-        print(f"🔍 Mounting: {workspace_mount} -> /workspace")
+        print(f" Mounting: {workspace_mount} -> /workspace")
         print(f"D drive contents local: {os.listdir(workspace_mount) if os.path.exists(workspace_mount) else 'DIR NOT FOUND'}")
 
         cmd_args = [
@@ -190,7 +190,7 @@ class DockerRunner:
             DockerRunner.IMAGE_NAME,
             "sleep", "infinity"
         ]
-        print(f"🚀 Running Docker command: {cmd_args}")
+        print(f" Running Docker command: {cmd_args}")
         
         try:
              proc = await asyncio.create_subprocess_exec(
@@ -200,19 +200,19 @@ class DockerRunner:
              )
              stdout, stderr = await proc.communicate()
              if proc.returncode != 0:
-                 print(f"❌ Failed to start worker: {stderr.decode()}")
+                 print(f" Failed to start worker: {stderr.decode()}")
                  return False
              
-             print(f"✅ Worker started: {stdout.decode().strip()[:12]}")
+             print(f" Worker started: {stdout.decode().strip()[:12]}")
              # Wait for status=running
              for _ in range(10):
                  if await DockerRunner._is_container_running(DockerRunner.WORKER_NAME):
                      return True
                  await asyncio.sleep(1)
-             print("❌ Worker stuck in starting state.")
+             print(" Worker stuck in starting state.")
              return False
         except Exception as e:
-             print(f"❌ Exception starting worker: {e!r}")
+             print(f" Exception starting worker: {e!r}")
              import traceback
              traceback.print_exc()
              return False
@@ -250,7 +250,7 @@ class DockerRunner:
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"⚠️ Could not read {path}: {e}")
+            print(f" Could not read {path}: {e}")
         return None
 
     @staticmethod

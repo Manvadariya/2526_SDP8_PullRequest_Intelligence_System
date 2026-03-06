@@ -458,7 +458,7 @@ Suggestion: Concrete improvement
 
 🟣 Recommendation with reasoning
 
-🧹 Maintainability & Clarity
+ Maintainability & Clarity
 
 🔵 Refactor suggestions improving team velocity
 
@@ -496,19 +496,17 @@ If reviewing ML / AI pipelines, evaluate data leakage, prompt injection, and uns
 """
 
         try:
-            response = self.llm.client.chat.completions.create(
-                model=self.llm.model,
+            ai_response = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}]
             )
             
-            ai_response = response.choices[0].message.content.strip()
             return {"axiom_review": ai_response}
             
         except Exception as e:
-            print(f"❌ Batch review failed: {e}")
+            print(f" Batch review failed: {e}")
             import traceback
             traceback.print_exc()
-            return {"error": f"⚠️ AI Review Failed: {str(e)[:100]}"}
+            return {"error": f" AI Review Failed: {str(e)[:100]}"}
 
     def run_inline_review(self, raw_diff: str, pr_title: str, custom_instructions: str, custom_checks: list = None, repo_path: str = None, pr_number: int = None, commit_id: str = None, repo_name: str = None) -> dict:
         """
@@ -716,38 +714,36 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                             messages.append({"role": "assistant", "content": "0e400"})
                             messages.append({"role": "user", "content": "That is NOT valid JSON. You returned a number, not a JSON object. You MUST return a JSON object starting with { and ending with }. Return the review as a JSON object with keys: change_summary, findings, security_audit, positive_observations, recommendation. Start your response with { immediately."})
                         
-                        response = self.llm.client.chat.completions.create(
-                            model=self.llm.model,
+                        content = self.llm.chat(
                             messages=messages,
                             response_format={"type": "json_object"},
                             temperature=0.1
                         )
                         
                         # Guard: empty response
-                        if not response.choices or not response.choices[0].message.content:
+                        if not content:
                             print(f"  [Apex] Empty response for {filepath} (attempt {attempt}). Retrying...")
                             if attempt == 1:
                                 # Retry with shorter prompt
                                 user_prompt = user_prompt.replace(safe_full_file, "[file content omitted]")
                             continue
                         
-                        content = response.choices[0].message.content
                         print(f"  [Apex] Response for {filepath} (attempt {attempt}): {content[:120]}...")
                         
                         # Pre-check: does it even look like a JSON object?
                         if '{' not in content:
-                            print(f"  [Apex] ⚠️ No JSON object in response (attempt {attempt}). Got: {content[:80]}")
+                            print(f"  [Apex]  No JSON object in response (attempt {attempt}). Got: {content[:80]}")
                             continue
                         
                         result = self._extract_and_parse_json(content)
                         break  # Success!
                         
                     except ValueError as ve:
-                        print(f"  [Apex] ⚠️ Parse failed (attempt {attempt}): {ve}")
+                        print(f"  [Apex]  Parse failed (attempt {attempt}): {ve}")
                         continue
                 
                 if result is None:
-                    print(f"  [Apex] ❌ All {max_retries} attempts failed for {filepath}. Skipping.")
+                    print(f"  [Apex]  All {max_retries} attempts failed for {filepath}. Skipping.")
                     files_reviewed_count += 1
                     clean_files.append(filepath)
                     continue
@@ -766,7 +762,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 # Store LGTM note for clean files
                 lgtm_note = result.get("lgtm_note", "")
                 
-                print(f"  [Apex] ✅ {len(findings)} findings in {filepath}")
+                print(f"  [Apex]  {len(findings)} findings in {filepath}")
                 
                 actionable_count = 0
                 nitpick_count = 0
@@ -811,9 +807,9 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                         
                         # Severity badge mapping
                         severity_badges = {
-                            "CRITICAL": "⚠️ Potential issue | 🔴 Critical",
-                            "HIGH": "⚠️ Potential issue | 🟠 High",
-                            "MEDIUM": "⚠️ Potential issue | 🟡 Medium",
+                            "CRITICAL": " Potential issue | 🔴 Critical",
+                            "HIGH": " Potential issue | 🟠 High",
+                            "MEDIUM": " Potential issue | 🟡 Medium",
                             "LOW": "💡 Suggestion | 🔵 Low",
                             "INFO": "ℹ️ Note | ⚪ Info"
                         }
@@ -836,10 +832,10 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                             body += "```\n\n"
                             body += "</details>\n\n"
                         
-                        # 📝 Committable suggestion
+                        #  Committable suggestion
                         if suggestion:
                             body += "<details>\n"
-                            body += "<summary>📝 Committable suggestion</summary>\n\n"
+                            body += "<summary> Committable suggestion</summary>\n\n"
                             body += "> ‼️ **IMPORTANT**\n"
                             body += "> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n"
                             body += f"```suggestion\n{suggestion}\n```\n\n"
@@ -887,7 +883,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 files_reviewed_count += 1
 
             except Exception as e:
-                print(f"  [Apex] ❌ Review failed for {filepath}: {e}")
+                print(f"  [Apex]  Review failed for {filepath}: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -927,7 +923,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
         """Format a single file's review data into professional markdown with dropdowns."""
         try:
             verdict = review_data.get("verdict", "COMMENT")
-            verdict_emoji = {"APPROVE": "✅", "REQUEST_CHANGES": "🔴", "COMMENT": "💬"}.get(verdict, "💬")
+            verdict_emoji = {"APPROVE": "", "REQUEST_CHANGES": "🔴", "COMMENT": "💬"}.get(verdict, "💬")
             
             # Get file extension for syntax highlighting
             ext = filepath.split('.')[-1] if '.' in filepath else 'text'
@@ -968,11 +964,11 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
             # Issues Section
             issues = review_data.get('issues', [])
             issues_severity = review_data.get('issues_severity', 'None')
-            severity_colors = {'Critical': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢', 'None': '✅'}
+            severity_colors = {'Critical': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢', 'None': ''}
             
             if issues and len(issues) > 0:
                 comment += f"""<details open>
-<summary>⚠️ <strong>Issues Found</strong> ({severity_colors.get(issues_severity, '⚪')} {issues_severity})</summary>
+<summary> <strong>Issues Found</strong> ({severity_colors.get(issues_severity, '⚪')} {issues_severity})</summary>
 
 | # | Type | Severity | Location | Description |
 |:-:|:----:|:--------:|:--------:|:------------|
@@ -994,7 +990,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 
                 comment += "\n</details>\n\n"
             else:
-                comment += "> ✅ **No issues found** - Code looks good!\n\n"
+                comment += ">  **No issues found** - Code looks good!\n\n"
             
             # Merge Impact Section
             merge_impact = review_data.get('merge_impact', {})
@@ -1005,7 +1001,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 testing = merge_impact.get('testing_required', [])
                 deployment = merge_impact.get('deployment_notes', 'None')
                 
-                breaking_icon = "🔴" if breaking.lower().startswith('yes') else "✅"
+                breaking_icon = "🔴" if breaking.lower().startswith('yes') else ""
                 rollback_colors = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢'}
                 
                 comment += f"""<details>
@@ -1037,7 +1033,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 conflicts = conflict_risk.get('potential_conflicts', [])
                 tips = conflict_risk.get('resolution_tips', 'Standard merge resolution')
                 
-                risk_colors = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢', 'None': '✅'}
+                risk_colors = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢', 'None': ''}
                 
                 comment += f"""<details>
 <summary>🔀 <strong>Merge Conflict Risk</strong> ({risk_colors.get(risk_level, '🟢')} {risk_level})</summary>
@@ -1055,15 +1051,15 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
             # Code Quality Section
             quality = review_data.get('code_quality', {})
             if quality:
-                quality_icons = {'Excellent': '🌟', 'Good': '✅', 'Fair': '🟡', 'Poor': '🔴'}
+                quality_icons = {'Excellent': '🌟', 'Good': '', 'Fair': '🟡', 'Poor': '🔴'}
                 
                 comment += f"""<details>
 <summary>📊 <strong>Code Quality Metrics</strong></summary>
 
 | Metric | Rating | Notes |
 |:-------|:------:|:------|
-| Readability | {quality_icons.get(quality.get('readability', 'Good').split(' - ')[0] if isinstance(quality.get('readability'), str) else 'Good', '✅')} {quality.get('readability', 'Good')} | - |
-| Maintainability | {quality_icons.get(quality.get('maintainability', 'Good').split(' - ')[0] if isinstance(quality.get('maintainability'), str) else 'Good', '✅')} {quality.get('maintainability', 'Good')} | - |
+| Readability | {quality_icons.get(quality.get('readability', 'Good').split(' - ')[0] if isinstance(quality.get('readability'), str) else 'Good', '')} {quality.get('readability', 'Good')} | - |
+| Maintainability | {quality_icons.get(quality.get('maintainability', 'Good').split(' - ')[0] if isinstance(quality.get('maintainability'), str) else 'Good', '')} {quality.get('maintainability', 'Good')} | - |
 | Test Coverage | {quality.get('test_coverage', 'Unknown')} | - |
 | Documentation | {quality.get('documentation', 'Adequate')} | - |
 
@@ -1080,10 +1076,10 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 owasp = security.get('owasp_categories', [])
                 
                 sec_icon = "🔴" if vuln_found.lower() == 'yes' else "🛡️"
-                risk_colors = {'Critical': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢', 'None': '✅'}
+                risk_colors = {'Critical': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢', 'None': ''}
                 
                 comment += f"""<details>
-<summary>{sec_icon} <strong>Security Analysis</strong> ({risk_colors.get(sec_risk, '✅')} {sec_risk} Risk)</summary>
+<summary>{sec_icon} <strong>Security Analysis</strong> ({risk_colors.get(sec_risk, '')} {sec_risk} Risk)</summary>
 
 **Vulnerabilities Found:** {vuln_found}
 
@@ -1140,7 +1136,7 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
 {after if after else '// No changes needed'}
 ```
 
-> ✅ This suggestion has been validated for syntax correctness
+>  This suggestion has been validated for syntax correctness
 
 </details>
 
@@ -1183,10 +1179,10 @@ Additional Context:
                         check = result.get('check', 'Unknown check')
                         status = result.get('status', 'Unknown')
                         details = result.get('details', '-')
-                        icon = "✅" if status.lower() == 'pass' else "❌"
+                        icon = "" if status.lower() == 'pass' else ""
                         comment += f"| {check} | {icon} {status} | {details} |\n"
                     else:
-                        icon = "✅" if str(result).lower().startswith('pass') else "❌"
+                        icon = "" if str(result).lower().startswith('pass') else ""
                         comment += f"| Custom Check | {icon} | {result} |\n"
                 
                 comment += "\n</details>\n\n"
@@ -1194,7 +1190,7 @@ Additional Context:
             # Final Verdict Section
             verdict_reason = review_data.get('verdict_reason', '')
             verdict_full = {
-                "APPROVE": "✅ **APPROVED** - This code is ready to merge",
+                "APPROVE": " **APPROVED** - This code is ready to merge",
                 "REQUEST_CHANGES": "🔴 **CHANGES REQUESTED** - Please address the issues above before merging",
                 "COMMENT": "💬 **REVIEW COMPLETE** - Comments provided for consideration"
             }.get(verdict, "Review completed")
@@ -1212,7 +1208,7 @@ Additional Context:
             return comment
             
         except Exception as e:
-            return f"⚠️ Format Error: {e}"
+            return f" Format Error: {e}"
     
     def _extract_clean_code(self, diff: str, max_lines: int = 50) -> str:
         """Extract clean code from diff, removing diff markers and applying ellipsis if too long."""

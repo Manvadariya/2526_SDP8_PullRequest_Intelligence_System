@@ -9,6 +9,9 @@ from database import init_db, get_session
 from models import Job
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi.middleware.cors import CORSMiddleware
+import auth
+
 # 1. Lifecycle Event to Init DB
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,15 +21,27 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PR Review Bot", lifespan=lifespan)
 orchestrator = Orchestrator()
 
+# Register routers
+app.include_router(auth.router)
+
+# CORS — allow frontend dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- DEBUG: Log ALL incoming requests ---
 class DebugMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         print(f"\n{'='*60}")
-        print(f"📨 INCOMING REQUEST: {request.method} {request.url.path}")
+        print(f" INCOMING REQUEST: {request.method} {request.url.path}")
         print(f"   Headers: {dict(request.headers)}")
         print(f"{'='*60}")
         response = await call_next(request)
-        print(f"📤 RESPONSE: {response.status_code}")
+        print(f" RESPONSE: {response.status_code}")
         return response
 
 app.add_middleware(DebugMiddleware)
@@ -47,7 +62,7 @@ async def receive_webhook(
     payload: dict = Body(...),
     session: AsyncSession = Depends(get_session)
 ):
-    print(f"✅ Webhook received! Action: {payload.get('action')}")
+    print(f" Webhook received! Action: {payload.get('action')}")
     
     action = payload.get("action")
     if action not in ["opened", "synchronize", "reopened"]:
@@ -112,9 +127,9 @@ if __name__ == "__main__":
                         except subprocess.CalledProcessError:
                             pass
             if not pids_killed:
-                print(f"✅ Port {port} is free")
+                print(f" Port {port} is free")
         except Exception as e:
-            print(f"⚠️ Could not check port: {e}")
+            print(f" Could not check port: {e}")
 
     # Auto-clear the port before starting
     if sys.platform.startswith("win"):
@@ -122,7 +137,7 @@ if __name__ == "__main__":
         # asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     import uvicorn
-    print(f"\n🚀 Starting PR Review Bot on http://0.0.0.0:{PORT}")
+    print(f"\n Starting PR Review Bot on http://0.0.0.0:{PORT}")
     print(f"   Health check: http://localhost:{PORT}/health")
     print(f"   Webhook: POST http://localhost:{PORT}/webhook/pr\n")
     uvicorn.run(app, host="0.0.0.0", port=PORT)

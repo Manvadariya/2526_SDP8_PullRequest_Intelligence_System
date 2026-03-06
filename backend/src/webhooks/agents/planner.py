@@ -76,18 +76,19 @@ class ReviewPlanner:
                         messages.append({"role": "assistant", "content": "0e400"})
                         messages.append({"role": "user", "content": "That is NOT valid JSON. You returned a number. Return a JSON object with keys: review_strategy, high_risk_files, ignore_files, focus_instructions. Start with { immediately."})
                     
-                    response = self.llm.client.chat.completions.create(
-                        model=self.llm.model,
+                    content = self.llm.chat(
                         messages=messages,
                         response_format={"type": "json_object"},
                         temperature=0.1
                     )
-                    content = response.choices[0].message.content
+                    if not content:
+                        print(f"  [Planner] LLM returned empty response")
+                        continue
                     print(f"  [Planner] Response (attempt {attempt}): {content[:100]}...")
                     
                     # Pre-check: must contain { to be a JSON object
                     if '{' not in content:
-                        print(f"  [Planner] ⚠️ No JSON object in response (attempt {attempt})")
+                        print(f"  [Planner] No JSON object in response (attempt {attempt})")
                         continue
                     
                     # Strip markdown code fences if present
@@ -104,22 +105,22 @@ class ReviewPlanner:
                     plan = json.loads(clean)
                     
                     if not isinstance(plan, dict):
-                        print(f"  [Planner] ⚠️ Got {type(plan).__name__} instead of dict (attempt {attempt})")
+                        print(f"  [Planner] Got {type(plan).__name__} instead of dict (attempt {attempt})")
                         continue
                     
                     # Sanity checks
                     if "high_risk_files" not in plan: plan["high_risk_files"] = []
                     if "ignore_files" not in plan: plan["ignore_files"] = []
                     
-                    print(f"  [Planner] ✅ Plan ready: {len(plan.get('high_risk_files', []))} high-risk, {len(plan.get('ignore_files', []))} ignored")
+                    print(f"  [Planner] Plan ready: {len(plan.get('high_risk_files', []))} high-risk, {len(plan.get('ignore_files', []))} ignored")
                     return plan
                     
                 except (json.JSONDecodeError, ValueError) as parse_err:
-                    print(f"  [Planner] ⚠️ Parse failed (attempt {attempt}): {parse_err}")
+                    print(f"  [Planner] Parse failed (attempt {attempt}): {parse_err}")
                     continue
             
             # All retries failed
-            print(f"  [Planner] ❌ All {max_retries} attempts failed. Falling back to full review.")
+            print(f"  [Planner] All {max_retries} attempts failed. Falling back to full review.")
             return {
                 "review_strategy": "fallback_full_review",
                 "high_risk_files": [f.get('filename') for f in pr_files],
@@ -128,7 +129,7 @@ class ReviewPlanner:
             }
             
         except Exception as e:
-            print(f"⚠️ Planner Failed: {e}")
+            print(f"Planner Failed: {e}")
             traceback.print_exc()
             # Fallback: Review everything
             return {

@@ -22,7 +22,7 @@ async def verify():
     print(f"Worker running: {running}")
     
     if not running:
-        print("❌ Worker failed to start.")
+        print(" Worker failed to start.")
         return
 
     # 2. Simulate RepoManager: Create a fake repo dir in shared workspace
@@ -60,11 +60,11 @@ async def verify():
     lint = results.get("lint", {})
     details = lint.get("details", [])
     if details:
-        print(f"✅ Lint issues found: {len(details)} (Expected)")
+        print(f" Lint issues found: {len(details)} (Expected)")
         for d in details:
             print(f"  - {d.get('message')}")
     else:
-        print("⚠️ No lint issues found. Verify run_checks.sh output.")
+        print(" No lint issues found. Verify run_checks.sh output.")
 
 if __name__ == "__main__":
     asyncio.run(verify())

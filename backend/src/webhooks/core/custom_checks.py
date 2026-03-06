@@ -20,7 +20,7 @@ class CustomCheckLoader:
     @staticmethod
     async def load_from_repo(gh, repo: str, sha: str) -> Dict:
         """Load custom checks from .pr-reviewer.yml in the repository."""
-        print(f"🔍 Loading custom checks from {repo}...")
+        print(f" Loading custom checks from {repo}...")
         
         config = {
             "enable_review": True,
@@ -36,9 +36,9 @@ class CustomCheckLoader:
             if content:
                 user_config = yaml.safe_load(content)
                 config = CustomCheckLoader._merge_config(config, user_config)
-                print("✅ Loaded .pr-reviewer.yml")
+                print(" Loaded .pr-reviewer.yml")
         except Exception as e:
-            print(f"⚠️ No .pr-reviewer.yml found: {e}")
+            print(f" No .pr-reviewer.yml found: {e}")
         
         # Try best_practices.md or similar
         try:
@@ -48,10 +48,10 @@ class CustomCheckLoader:
                     checks = CustomCheckLoader._parse_markdown_checks(content)
                     if checks:
                         config["custom_checks"].extend(checks)
-                        print(f"✅ Loaded checks from {doc_name}")
+                        print(f" Loaded checks from {doc_name}")
                         break
         except Exception as e:
-            print(f"⚠️ No custom docs found: {e}")
+            print(f" No custom docs found: {e}")
         
         return config
     

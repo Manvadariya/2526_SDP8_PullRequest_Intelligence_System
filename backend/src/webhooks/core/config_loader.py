@@ -8,17 +8,17 @@ DEFAULT_CONFIG = {
 }
 
 async def load_repo_config(gh: GitHubClient, repo: str, sha: str) -> dict:
-    print(f"🔍 Checking for .pr-reviewer.yml in {repo} at {sha[:7]}...")
+    print(f" Checking for .pr-reviewer.yml in {repo} at {sha[:7]}...")
     
     try:
         content = await gh.get_file_content(repo, ".pr-reviewer.yml", sha)
         if content:
             user_config = yaml.safe_load(content)
-            print("✅ Found custom config!")
+            print(" Found custom config!")
             # Merge with defaults
             return {**DEFAULT_CONFIG, **user_config}
     except Exception as e:
-        print(f"⚠️ Error loading config: {e}")
+        print(f" Error loading config: {e}")
 
     print("ℹ️ Using default config.")
     return DEFAULT_CONFIG

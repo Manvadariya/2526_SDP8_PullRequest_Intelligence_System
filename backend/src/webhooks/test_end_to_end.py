@@ -99,7 +99,7 @@ class TestEndToEnd(unittest.IsolatedAsyncioTestCase):
                 mock_agent.run_inline_review.assert_called()
                 print("  [PASS] ReviewerAgent called.")
                 
-                mock_gh.add_label.assert_called_with("owner/repo", 123, "ReviewedBySapientPR")
+                mock_gh.add_label.assert_called_with("owner/repo", 123, "ReviewedByApex")
                 print("  [PASS] PR Label added.")
                 
                 # Check Database Interaction

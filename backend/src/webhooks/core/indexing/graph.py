@@ -93,4 +93,4 @@ class SymbolGraph:
                 self.graph.remove_nodes_from(nodes_to_remove)
                 
         except Exception as e:
-            print(f"⚠️ Failed to remove nodes for {file_path}: {e}")
+            print(f" Failed to remove nodes for {file_path}: {e}")

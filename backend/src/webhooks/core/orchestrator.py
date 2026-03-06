@@ -24,7 +24,7 @@ class Orchestrator:
         self.indexer = IndexManager()
 
     async def process_pr(self, metadata: PRMetadata, job_id: int):
-        print(f"🚀 Job {job_id}: Processing PR #{metadata.pr_number}")
+        print(f" Job {job_id}: Processing PR #{metadata.pr_number}")
         
         async with AsyncSession(engine, expire_on_commit=False) as session:
             try:
@@ -63,13 +63,13 @@ class Orchestrator:
                         try:
                             docker_results = await DockerRunner.run_checks_in_container(repo_path, changed_files)
                         except Exception as e:
-                            print(f"⚠️ Docker checks failed (continuing with LLM review): {e}")
+                            print(f" Docker checks failed (continuing with LLM review): {e}")
                             docker_results = {
                                 "lint": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)},
                                 "security": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)}
                             }
                     else:
-                         print("⚠️ Docker checks disabled in config. Skipping.")
+                         print(" Docker checks disabled in config. Skipping.")
                          docker_results = {
                              "lint": {"summary": "Disabled by config", "details": []},
                              "security": {"summary": "Disabled by config", "details": []}
@@ -83,7 +83,7 @@ class Orchestrator:
                     try:
                         self.indexer.process_diff(changed_files, repo_path)
                     except Exception as e:
-                        print(f"⚠️ Index update failed (continuing): {e}")
+                        print(f" Index update failed (continuing): {e}")
 
                     # 7. Combine Reports for Context
                     project_context = await ProjectContextBuilder.build(
@@ -98,7 +98,7 @@ class Orchestrator:
 
 ## Automated Analysis Results
 
-### 🔍 Linting ({lint_results.get('summary', 'N/A')})
+###  Linting ({lint_results.get('summary', 'N/A')})
 {self._format_lint_results(lint_results)}
 
 ### 🛡️ Security ({sec_results.get('summary', 'N/A')})
@@ -171,7 +171,7 @@ class Orchestrator:
                     file_summaries = review_result.get("file_summaries", {})
                     stats = review_result.get("stats", {})
                     
-                    # ── DROPDOWN 1: 📝 Walkthrough ──
+                    # ── DROPDOWN 1:  Walkthrough ──
                     walkthrough_parts = []
                     for fp, cs in file_summaries.items():
                         if cs and cs.strip():
@@ -179,7 +179,7 @@ class Orchestrator:
                     walkthrough = " ".join(walkthrough_parts) if walkthrough_parts else review_result.get("summary", "Review complete.")
                     
                     summary = "<details>\n"
-                    summary += "<summary>📝 Walkthrough</summary>\n\n"
+                    summary += "<summary> Walkthrough</summary>\n\n"
                     summary += f"## Walkthrough\n\n{walkthrough}\n\n"
                     summary += "## Changes\n\n"
                     summary += "| Cohort / File(s) | Summary |\n"
@@ -197,43 +197,43 @@ class Orchestrator:
                     
                     # Check: Security Scan
                     if sec_results.get("error"):
-                        checks.append({"name": "Security Scan", "status": "Failed", "emoji": "❌", "group": "failed",
+                        checks.append({"name": "Security Scan", "status": "Failed", "emoji": "", "group": "failed",
                             "explanation": f"Security scan encountered an error: {sec_results['error'][:100]}",
                             "resolution": "Fix the security scanner configuration or dependencies."})
                     elif sec_results.get("details"):
                         n_sec = len(sec_results["details"])
-                        checks.append({"name": "Security Scan", "status": "Warning", "emoji": "⚠️", "group": "failed",
+                        checks.append({"name": "Security Scan", "status": "Warning", "emoji": "", "group": "failed",
                             "explanation": f"Found {n_sec} potential security issue(s) in the codebase.",
                             "resolution": "Review the security findings and address any confirmed vulnerabilities."})
                     else:
-                        checks.append({"name": "Security Scan", "status": "Passed", "emoji": "✅", "group": "passed",
+                        checks.append({"name": "Security Scan", "status": "Passed", "emoji": "", "group": "passed",
                             "explanation": "No security issues detected.", "resolution": ""})
                     
                     # Check: Lint Analysis
                     lint_details = lint_results.get("details", [])
                     if lint_details and len(lint_details) > 10:
-                        checks.append({"name": "Lint Analysis", "status": "Warning", "emoji": "⚠️", "group": "failed",
+                        checks.append({"name": "Lint Analysis", "status": "Warning", "emoji": "", "group": "failed",
                             "explanation": f"Found {len(lint_details)} linting issues across the changed files.",
                             "resolution": "Run the project linter and fix the reported issues before merging."})
                     elif lint_details:
-                        checks.append({"name": "Lint Analysis", "status": "Passed", "emoji": "✅", "group": "passed",
+                        checks.append({"name": "Lint Analysis", "status": "Passed", "emoji": "", "group": "passed",
                             "explanation": f"Minor lint issues ({len(lint_details)}), within acceptable threshold.", "resolution": ""})
                     else:
-                        checks.append({"name": "Lint Analysis", "status": "Passed", "emoji": "✅", "group": "passed",
+                        checks.append({"name": "Lint Analysis", "status": "Passed", "emoji": "", "group": "passed",
                             "explanation": "No linting issues detected.", "resolution": ""})
                     
                     # Check: Code Review
                     n_issues = len(inline_comments)
                     if verdict in ("REQUEST_CHANGES", "BLOCK"):
-                        checks.append({"name": "Code Review", "status": "Failed", "emoji": "❌", "group": "failed",
+                        checks.append({"name": "Code Review", "status": "Failed", "emoji": "", "group": "failed",
                             "explanation": f"Found {n_issues} issue(s) that require changes before merging.",
                             "resolution": "Address the issues flagged in the inline review comments."})
                     elif n_issues > 0:
-                        checks.append({"name": "Code Review", "status": "Warning", "emoji": "⚠️", "group": "failed",
+                        checks.append({"name": "Code Review", "status": "Warning", "emoji": "", "group": "failed",
                             "explanation": f"Found {n_issues} issue(s) that should be reviewed.",
                             "resolution": "Review the inline comments and address the suggestions."})
                     else:
-                        checks.append({"name": "Code Review", "status": "Passed", "emoji": "✅", "group": "passed",
+                        checks.append({"name": "Code Review", "status": "Passed", "emoji": "", "group": "passed",
                             "explanation": "All reviewed files passed with no issues.", "resolution": ""})
                     
                     # Check: PR Description
@@ -243,7 +243,7 @@ class Orchestrator:
                             "explanation": "The PR description is missing or too brief to assess intent.",
                             "resolution": "Add a descriptive PR body summarizing the changes and their purpose."})
                     else:
-                        checks.append({"name": "PR Description", "status": "Passed", "emoji": "✅", "group": "passed",
+                        checks.append({"name": "PR Description", "status": "Passed", "emoji": "", "group": "passed",
                             "explanation": "PR has a meaningful description.", "resolution": ""})
                     
                     # ── Separate into groups ──
@@ -261,25 +261,25 @@ class Orchestrator:
                     
                     summary += "## Pre-merge checks and finishing touches\n\n"
                     
-                    # ── DROPDOWN 2: ❌ Failed checks (dynamic) ──
+                    # ── DROPDOWN 2:  Failed checks (dynamic) ──
                     if failed_checks:
                         failed_label = ", ".join(failed_parts)
                         summary += "<details>\n"
-                        summary += f"<summary>❌ Failed checks ({failed_label})</summary>\n\n"
+                        summary += f"<summary> Failed checks ({failed_label})</summary>\n\n"
                         summary += "| Check name | Status | Explanation | Resolution |\n"
                         summary += "|---|---|---|---|\n"
                         for c in failed_checks:
                             summary += f"| {c['name']} | {c['emoji']} {c['status']} | {c['explanation']} | {c['resolution']} |\n"
                         summary += "\n</details>\n\n"
                     
-                    # ── DROPDOWN 3: ✅ Passed checks (dynamic) ──
+                    # ── DROPDOWN 3:  Passed checks (dynamic) ──
                     if passed_checks:
                         summary += "<details>\n"
-                        summary += f"<summary>✅ Passed checks ({len(passed_checks)} passed)</summary>\n\n"
+                        summary += f"<summary> Passed checks ({len(passed_checks)} passed)</summary>\n\n"
                         summary += "| Check name | Status | Explanation |\n"
                         summary += "|---|---|---|\n"
                         for c in passed_checks:
-                            summary += f"| {c['name']} | ✅ Passed | {c['explanation']} |\n"
+                            summary += f"| {c['name']} |  Passed | {c['explanation']} |\n"
                         summary += "\n</details>\n\n"
                     
                     # ── DROPDOWN 4: ✨ Finishing touches (dynamic) ──
@@ -328,7 +328,7 @@ class Orchestrator:
                                 all_raw_findings, pr_title=metadata.title
                             )
                         except Exception as e:
-                            print(f"  [FixBot] ⚠️ Fix prompt generation failed: {e}")
+                            print(f"  [FixBot]  Fix prompt generation failed: {e}")
                             fix_prompt = "Fix prompt generation failed. Please refer to inline comments."
                         
                         review_body += "<details>\n"
@@ -336,10 +336,10 @@ class Orchestrator:
                         review_body += fix_prompt + "\n\n"
                         review_body += "</details>\n\n"
                     
-                    # ── BLOCK 2 DROPDOWN 2: 🧹 Nitpick comments (N) ──
+                    # ── BLOCK 2 DROPDOWN 2:  Nitpick comments (N) ──
                     if nitpicks:
                         review_body += "<details>\n"
-                        review_body += f"<summary>🧹 Nitpick comments ({total_nitpicks})</summary>\n\n"
+                        review_body += f"<summary> Nitpick comments ({total_nitpicks})</summary>\n\n"
                         
                         for nit_file, nit_list in nitpicks.items():
                             # Sub-dropdown per file
@@ -483,8 +483,8 @@ class Orchestrator:
                     await self.gh.add_label(metadata.repo_full_name, metadata.pr_number, "ReviewedByApex")
                     
                     # 13. Determine Status
-                    # ✅ = review completed (even if issues found)
-                    # ❌ = only if an actual error/crash occurred during the process
+                    #  = review completed (even if issues found)
+                    #  = only if an actual error/crash occurred during the process
                     status_state = "success"
                     
                     if verdict == "REQUEST_CHANGES":
@@ -515,13 +515,13 @@ class Orchestrator:
                     session.add(job)
                     await session.commit()
                     
-                    print(f"✅ Job {job_id}: {status_state.upper()} - {len(file_diffs)} files, {len(inline_comments)} inline comments, {len(clean_files)} clean")
+                    print(f" Job {job_id}: {status_state.upper()} - {len(file_diffs)} files, {len(inline_comments)} inline comments, {len(clean_files)} clean")
 
                 finally:
                     manager.cleanup()
 
             except Exception as e:
-                print(f"❌ Job {job_id}: Failed - {e}")
+                print(f" Job {job_id}: Failed - {e}")
                 import traceback
                 traceback.print_exc()
                 

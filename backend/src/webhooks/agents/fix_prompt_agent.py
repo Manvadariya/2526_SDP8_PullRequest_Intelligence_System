@@ -76,7 +76,7 @@ class FixPromptAgent:
             A ready-to-use fix prompt string
         """
         if not findings_by_file:
-            return "No actionable issues found. The code looks good! ✅"
+            return "No actionable issues found. The code looks good! "
 
         # Build detailed structured input for the LLM
         input_text = ""
@@ -106,8 +106,7 @@ class FixPromptAgent:
             input_text += "\n"
 
         try:
-            response = self.llm.client.chat.completions.create(
-                model=self.llm.model,
+            result = self.llm.chat(
                 messages=[
                     {"role": "system", "content": FIX_PROMPT_SYSTEM},
                     {"role": "user", "content": input_text}
@@ -116,19 +115,14 @@ class FixPromptAgent:
                 max_tokens=8000
             )
             
-            if response.choices and response.choices[0].message.content:
-                result = response.choices[0].message.content.strip()
-                # Validate it's not too short (LLM sometimes returns brief responses)
-                if len(result) > 50:
-                    return result
-                else:
-                    print(f"  [FixBot] ⚠️ LLM returned too-short response ({len(result)} chars). Using fallback.")
-                    return self._detailed_fallback(findings_by_file)
+            if result and len(result) > 50:
+                return result
             else:
+                print(f"  [FixBot]  LLM returned too-short response ({len(result) if result else 0} chars). Using fallback.")
                 return self._detailed_fallback(findings_by_file)
 
         except Exception as e:
-            print(f"  [FixBot] ⚠️ LLM call failed: {e}. Using fallback formatter.")
+            print(f"  [FixBot]  LLM call failed: {e}. Using fallback formatter.")
             return self._detailed_fallback(findings_by_file)
 
     def _detailed_fallback(self, findings_by_file: dict) -> str:

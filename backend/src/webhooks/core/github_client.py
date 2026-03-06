@@ -32,10 +32,10 @@ class GitHubClient:
         existing_comment_id = await self._find_bot_comment(repo, pr_number)
         
         if existing_comment_id:
-            print(f"📝 Updating existing comment {existing_comment_id}...")
+            print(f" Updating existing comment {existing_comment_id}...")
             await self._update_comment(repo, existing_comment_id, signed_body)
         else:
-            print(f"📝 Creating new comment...")
+            print(f" Creating new comment...")
             await self._post_comment(repo, pr_number, signed_body)
 
     async def _find_bot_comment(self, repo: str, pr_number: int) -> int:
@@ -86,7 +86,7 @@ class GitHubClient:
                 file_signature = f"{FILE_SIGNATURE_PREFIX} {filepath} -->"
                 signed_body = f"## 📄 Review for `{filepath}`\n\n{review}\n\n{file_signature}"
                 
-                print(f"📝 Creating new comment for {filepath}...")
+                print(f" Creating new comment for {filepath}...")
                 await self._post_comment(repo, pr_number, signed_body)
 
     # --- NEW: Inline Review Comments (Coderabbit-style) ---
@@ -115,24 +115,24 @@ class GitHubClient:
             
             # 1. Success Case
             if resp.status_code in (200, 201):
-                print(f"✅ Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
+                print(f" Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
                 return True
             
             # 2. Specific Error: Self-Review Restriction
             if resp.status_code == 422 and "request changes on your own pull request" in resp.text:
-                print(f"⚠️ Cannot request changes on own PR. Retrying with COMMENT event...")
+                print(f" Cannot request changes on own PR. Retrying with COMMENT event...")
                 payload["event"] = "COMMENT"
                 resp = await client.post(url, json=payload, headers=self.headers)
                 if resp.status_code in (200, 201):
-                    print(f"✅ Retry success: Posted as COMMENT.")
+                    print(f" Retry success: Posted as COMMENT.")
                     return True
             
             # 3. Failure Case
-            print(f"❌ Inline review failed ({resp.status_code}): {resp.text[:500]}")
+            print(f" Inline review failed ({resp.status_code}): {resp.text[:500]}")
             # Fallback: post as regular issue comment
             fallback = summary_body + "\n\n" if summary_body else ""
             if inline_comments:
-                fallback += "### ⚠️ Inline Comments (Fallback)\n"
+                fallback += "###  Inline Comments (Fallback)\n"
                 for c in inline_comments:
                     fallback += f"- **{c['path']}** (Line {c['line']}): {c['body']}\n"
             

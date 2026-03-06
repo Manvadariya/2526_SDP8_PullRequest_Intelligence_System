@@ -23,9 +23,9 @@ async def init_db():
             return
         except Exception as e:
             if i == retries - 1:
-                print(f"❌ [Database] Failed to connect after {retries} attempts: {e}")
+                print(f" [Database] Failed to connect after {retries} attempts: {e}")
                 raise e
-            print(f"⚠️ [Database] Connection failed ({e}). Retrying in 2s... ({i+1}/{retries})")
+            print(f" [Database] Connection failed ({e}). Retrying in 2s... ({i+1}/{retries})")
             await asyncio.sleep(2)
 
 async def get_session() -> AsyncSession:

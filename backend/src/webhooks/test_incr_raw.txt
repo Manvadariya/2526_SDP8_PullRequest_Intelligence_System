@@ -1,0 +1,37 @@
+C:\Users\manva\AppData\Local\Python\pythoncore-3.11-64\Lib\site-packages\tree_sitter\__init__.py:36: FutureWarning: Language(path, name) is deprecated. Use Language(ptr, name) instead.
+  warn("{} is deprecated. Use {} instead.".format(old, new), FutureWarning)
+============================================================
+  Part 9: Incremental Indexing Verification
+============================================================
+  Initializing IndexManager...
+  [IndexManager] Using local state (81 entries tracked)
+  [VectorStore] Using local Qdrant storage: D:\project\sdp\2526_SDP8_PullRequest_Intelligence_System\backend\src\webhooks\core\indexing\..\..\qdrant_data
+  Using temp file: D:\project\sdp\2526_SDP8_PullRequest_Intelligence_System\backend\src\webhooks\temp_incremental_test.py
+
+  Test 1: First Indexing (New File)
+  [IndexManager] Updating temp_incremental_test.py...
+  [PASS] Indexed in 2.26s
+
+  Test 2: Idempotency (Re-run same content)
+  [PASS] Skipped correctly in 0.00s (Hash match)
+
+  Test 3: Modification (Content Change)
+  [IndexManager] Updating temp_incremental_test.py...
+  [PASS] Updated index in 0.73s
+
+  Verifying Vector Store Content...
+  [PASS] Found 'test_func_v2' in Vector Store.
+  [PASS] 'test_func_v1' is gone (Correctly deleted old data).
+Traceback (most recent call last):
+  File "D:\project\sdp\2526_SDP8_PullRequest_Intelligence_System\backend\src\webhooks\test_incremental.py", line 119, in <module>
+    main()
+  File "D:\project\sdp\2526_SDP8_PullRequest_Intelligence_System\backend\src\webhooks\test_incremental.py", line 111, in main
+    if manager.redis:
+       ^^^^^^^^^^^^^
+AttributeError: 'IndexManager' object has no attribute 'redis'
+Exception ignored in: <function QdrantClient.__del__ at 0x00000279ED59F920>
+Traceback (most recent call last):
+  File "C:\Users\manva\AppData\Local\Python\pythoncore-3.11-64\Lib\site-packages\qdrant_client\qdrant_client.py", line 169, in __del__
+  File "C:\Users\manva\AppData\Local\Python\pythoncore-3.11-64\Lib\site-packages\qdrant_client\qdrant_client.py", line 178, in close
+  File "C:\Users\manva\AppData\Local\Python\pythoncore-3.11-64\Lib\site-packages\qdrant_client\local\qdrant_local.py", line 85, in close
+ImportError: sys.meta_path is None, Python is likely shutting down

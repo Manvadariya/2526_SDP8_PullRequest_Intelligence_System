@@ -10,13 +10,10 @@ class Config:
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     MODEL = os.getenv("MODEL", "meta-llama/llama-3.1-405b-instruct:free")
     
-    # LLM Provider Toggle: "openrouter" or "ollama"
+    # LLM Provider switching: "openrouter" or "gemini"
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
-    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b-instruct-q4_K_M")
-    
-    # Review Mode: "legacy" (scripted pipeline), "mcp_auto" (autonomous agent), "mcp_guided" (guided agent)
-    REVIEW_MODE = os.getenv("REVIEW_MODE", "legacy")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     
     # Defaults
     LINT_TIMEOUT = 30

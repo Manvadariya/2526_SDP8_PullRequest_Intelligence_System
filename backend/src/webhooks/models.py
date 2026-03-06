@@ -20,3 +20,15 @@ class AgentResult(SQLModel, table=True):
     output_json: str # Store full JSON response here
     
     job: Optional[Job] = Relationship(back_populates="results")
+
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    github_id: Optional[int] = Field(default=None, index=True)
+    username: str
+    avatar_url: Optional[str] = Field(default="")
+    access_token: str
+    refresh_token: Optional[str] = Field(default="")
+    provider: str = Field(default="github")       # "github" | "bitbucket"
+    provider_id: Optional[str] = Field(default="", index=True)
+    provider_url: Optional[str] = Field(default="")
+    created_at: datetime = Field(default_factory=datetime.utcnow)

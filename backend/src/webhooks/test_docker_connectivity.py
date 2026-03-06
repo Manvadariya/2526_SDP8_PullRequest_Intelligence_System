@@ -19,9 +19,9 @@ async def test_docker():
         print(f"STDOUT: {stdout.decode().strip()}")
         print(f"STDERR: {stderr.decode().strip()}")
     except FileNotFoundError:
-        print("❌ FileNotFoundError: 'docker' executable not found in PATH.")
+        print(" FileNotFoundError: 'docker' executable not found in PATH.")
     except Exception as e:
-        print(f"❌ Exception: {e}")
+        print(f" Exception: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_docker())

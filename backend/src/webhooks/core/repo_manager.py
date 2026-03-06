@@ -27,7 +27,7 @@ class RepoManager:
 
     def clone_and_checkout(self):
         try:
-            print(f"⬇️ Cloning to {self.temp_dir}...")
+            print(f" Cloning to {self.temp_dir}...")
             # 1. Clone
             subprocess.run(
                 ["git", "clone", self.repo_url, "."], 
@@ -50,7 +50,7 @@ class RepoManager:
     def cleanup(self):
         if os.path.exists(self.temp_dir):
             try:
-                print(f"🧹 Cleaning up {self.temp_dir}...")
+                print(f" Cleaning up {self.temp_dir}...")
                 
                 # On Windows, git files might be read-only; clear attributes first
                 for root, dirs, files in os.walk(self.temp_dir):
@@ -67,14 +67,14 @@ class RepoManager:
                 
                 # Now try to remove
                 shutil.rmtree(self.temp_dir, onerror=remove_readonly)
-                print(f"✅ Cleaned up {self.temp_dir}")
+                print(f" Cleaned up {self.temp_dir}")
             except Exception as e:
-                print(f"⚠️ Cleanup failed (non-critical): {e}")
+                print(f" Cleanup failed (non-critical): {e}")
                 # On Windows, some processes might still have locks; retry after a short delay
                 import time
                 time.sleep(0.1)
                 try:
                     shutil.rmtree(self.temp_dir, onerror=remove_readonly)
-                    print(f"✅ Cleaned up {self.temp_dir} (after retry)")
+                    print(f" Cleaned up {self.temp_dir} (after retry)")
                 except Exception as e2:
-                    print(f"⚠️ Second cleanup attempt failed: {e2}")
+                    print(f" Second cleanup attempt failed: {e2}")

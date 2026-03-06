@@ -10,6 +10,7 @@ sqlmodel
 aiosqlite
 httpx
 openai
+google-genai
 python-dotenv
 pydantic
 pyyaml

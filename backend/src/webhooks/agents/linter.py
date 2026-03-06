@@ -20,7 +20,7 @@ class LinterAgent:
         Run linters for all detected languages.
         Returns combined results from all linters.
         """
-        print("🔍 Running Multi-Language Linting...")
+        print(" Running Multi-Language Linting...")
         
         # Detect languages from file extensions
         languages = self._detect_languages(repo_path, changed_files)
@@ -35,7 +35,7 @@ class LinterAgent:
         
         for lang in languages:
             if lang in self.linters:
-                print(f"  📝 Linting {lang}...")
+                print(f"   Linting {lang}...")
                 result = self.linters[lang](repo_path)
                 all_results["by_language"][lang] = result
                 
