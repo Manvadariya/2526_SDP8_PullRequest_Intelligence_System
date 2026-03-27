@@ -42,16 +42,16 @@ function App() {
           <Route path="/home" element={<Home />} />
           <Route path="/repositories" element={<Repositories />} />
           <Route path="/reports" element={<Reports />} />
-          
+
           {/* Nested Repository Layout */}
           <Route path="/repositories/:repoName" element={<RepoLayout />}>
-             <Route index element={<Navigate to="overview" replace />} />
-             <Route path="overview" element={<Overview />} />
-             <Route path="issues" element={<Issues />} />
-             <Route path="metrics" element={<Metrics />} />
-             <Route path="reports" element={<Reports />} />
-             <Route path="pull-requests" element={<History />} />
-             <Route path="settings" element={<Settings />} />
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<Overview />} />
+            <Route path="issues" element={<Issues />} />
+            <Route path="metrics" element={<Metrics />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="pull-requests" element={<History />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
 
           <Route path="/pr" element={<PRVisualize />} />

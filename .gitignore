@@ -22,3 +22,12 @@ ai_review_workspace/
 node_modules/
 AgenticPR/dist/
 AgenticPR/.env
+
+# diagrams
+.qoder/
+output/
+tmp/
+
+image.png
+image1.png
+imagec.png

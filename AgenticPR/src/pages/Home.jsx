@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, ChevronDown, GitBranch, Shield, Zap, GitCommit, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -8,23 +8,25 @@ export default function Home() {
   const { user } = useAuth();
   const { data: repos = [], isLoading: reposLoading } = useActivatedRepos();
   const { data: allJobs = [], isLoading: jobsLoading } = useJobs();
+  const [searchTerm, setSearchTerm] = useState('');
   const jobs = allJobs.slice(0, 5);
   const loading = reposLoading || jobsLoading;
-  
+
   // Use profile data if auth works, otherwise fallback
   const displayName = user?.username || user?.name || "Developer";
 
   const timeAgo = (dateStr) => {
-    if (!dateStr) return 'just now';
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
   };
+
+  const filteredRepos = repos.filter(repo =>
+    repo.repo_full_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   // Compute stats from jobs
   const totalReviews = jobs.length;
@@ -33,7 +35,7 @@ export default function Home() {
   return (
     <div className="flex-1 overflow-y-auto bg-[#0E1116] text-[#E6EDF3] p-6">
       <div className="max-w-7xl mx-auto">
-        
+
         {/* Header Greeting */}
         <h1 className="text-2xl font-semibold mb-6">Good afternoon, {displayName}</h1>
 
@@ -45,21 +47,23 @@ export default function Home() {
               type="text"
               placeholder="Search repositories..."
               className="w-full bg-[#161B22] border border-[#30363D] rounded-md py-1.5 pl-9 pr-3 text-sm text-[#E6EDF3] placeholder-[#8B949E] focus:outline-none focus:border-[#58a6ff] focus:ring-1 focus:ring-[#58a6ff] transition-all"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <div className="flex items-center bg-[#161B22] rounded-md border border-[#30363D] overflow-hidden">
-            <button className="px-4 py-1.5 text-sm font-medium bg-[#E6EDF3] text-black">
+            <Link to="/repositories" className="px-4 py-1.5 text-sm font-medium bg-[#E6EDF3] text-black hover:bg-white transition-colors">
               All repositories
-            </button>
+            </Link>
           </div>
         </div>
 
         {/* Main Grid Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          
+
           {/* Left Column (Repositories & Recent PRs) */}
           <div className="lg:col-span-3 space-y-6">
-            
+
             {/* Repository List */}
             <div className="bg-[#161B22] border border-[#30363D] rounded-lg overflow-hidden">
               {loading ? (
@@ -67,8 +71,8 @@ export default function Home() {
                   <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mr-2" />
                   Loading repositories...
                 </div>
-              ) : repos.length > 0 ? (
-                repos.map((repo) => (
+              ) : filteredRepos.length > 0 ? (
+                filteredRepos.map((repo) => (
                   <Link
                     key={repo.id}
                     to={`/repositories/${repo.repo_name}/overview`}
@@ -92,6 +96,10 @@ export default function Home() {
                     </div>
                   </Link>
                 ))
+              ) : repos.length > 0 ? (
+                <div className="h-56 flex flex-col items-center justify-center text-[#8B949E]">
+                  <p>No repositories match your search.</p>
+                </div>
               ) : (
                 <div className="h-56 flex flex-col items-center justify-center text-[#8B949E]">
                   <p>No repositories activated yet.</p>
@@ -125,21 +133,15 @@ export default function Home() {
                             <span className="flex items-center gap-1">
                               <GitBranch size={12} /> #{job.pr_number}
                             </span>
-                            <span className={`px-1.5 py-0.5 rounded-sm font-medium tracking-wide ${
-                              job.status === 'success' ? 'bg-[#3fb950]/10 text-[#3fb950]' :
+                            <span className={`px-1.5 py-0.5 rounded-sm font-medium tracking-wide ${job.status === 'success' ? 'bg-[#3fb950]/10 text-[#3fb950]' :
                               job.status === 'failed' ? 'bg-[#f85149]/10 text-[#f85149]' :
-                              'bg-[#d29922]/10 text-[#d29922]'
-                            }`}>
+                                'bg-[#d29922]/10 text-[#d29922]'
+                              }`}>
                               {job.status?.toUpperCase()}
                             </span>
                             <span>⏱ {timeAgo(job.created_at)}</span>
                           </div>
                         </div>
-                      </div>
-                      <div className="w-7 h-7 rounded-md bg-[#21262D] border border-[#30363D] flex items-center justify-center text-xs font-bold shadow-sm">
-                        <span className={job.status === 'success' ? 'text-[#3fb950]' : 'text-[#d29922]'}>
-                          {job.commit_sha?.substring(0, 3)}
-                        </span>
                       </div>
                     </Link>
                   ))
@@ -157,7 +159,7 @@ export default function Home() {
           <div className="lg:col-span-1">
             <h2 className="text-[15px] font-semibold mb-3">This month so far...</h2>
             <div className="bg-[#161B22] border border-[#30363D] rounded-lg p-4 space-y-4">
-              
+
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-[#8B949E]">
                   <GitCommit size={15} />
@@ -165,7 +167,7 @@ export default function Home() {
                 </div>
                 <span className="text-[#E6EDF3] font-semibold">{totalReviews}</span>
               </div>
-              
+
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-[#8B949E]">
                   <Shield size={15} />
@@ -173,7 +175,7 @@ export default function Home() {
                 </div>
                 <span className="text-[#E6EDF3] font-semibold">{issuesPrevented}</span>
               </div>
-              
+
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-[#8B949E]">
                   <Zap size={15} />

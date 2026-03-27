@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi.middleware.cors import CORSMiddleware
 import auth
+import api_router
 
 # 1. Lifecycle Event to Init DB
 @asynccontextmanager
@@ -23,6 +24,7 @@ orchestrator = Orchestrator()
 
 # Register routers
 app.include_router(auth.router)
+app.include_router(api_router.router)
 
 # CORS — allow frontend dev server
 app.add_middleware(

@@ -8,6 +8,7 @@ class Job(SQLModel, table=True):
     pr_number: int
     commit_sha: str
     status: str = Field(default="queued")  # queued, processing, success, failure
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationship to agent results
@@ -32,3 +33,14 @@ class User(SQLModel, table=True):
     provider_id: Optional[str] = Field(default="", index=True)
     provider_url: Optional[str] = Field(default="")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ActivatedRepo(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    repo_full_name: str = Field(index=True)
+    repo_name: Optional[str] = Field(default="")
+    language: Optional[str] = Field(default="")
+    description: Optional[str] = Field(default="")
+    private: bool = Field(default=False)
+    activated_at: datetime = Field(default_factory=datetime.utcnow)

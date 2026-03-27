@@ -1,8 +1,10 @@
 """
 Part 4: Vector Storage Pipeline
 ===============================
-Manages embedding generation via GitHub Models API and storage in Qdrant.
-Ensures deterministic IDs for deduplication and handles the full indexing flow.
+Manages embedding generation and storage in Qdrant.
+Supports multiple embedding backends with automatic fallback:
+  1. Gemini (text-embedding-004) — generous free-tier
+  2. GitHub Models (text-embedding-3-large) — fallback
 """
 
 from __future__ import annotations
@@ -14,7 +16,6 @@ import hashlib
 from typing import List, Dict, Any, Optional
 
 from qdrant_client import QdrantClient, models
-from openai import OpenAI
 
 from .parser import UniversalParser, parse_file
 from .chunker import SmartChunker, Chunk
@@ -22,7 +23,7 @@ from .chunker import SmartChunker, Chunk
 
 class CodeVectorStore:
     """
-    Vector storage engine using Qdrant + GitHub Models Inference API.
+    Vector storage engine using Qdrant + Gemini/GitHub Models Inference API.
     Uses singleton pattern to prevent multiple Qdrant local clients.
     """
     _instance = None
@@ -39,8 +40,6 @@ class CodeVectorStore:
         self._initialized = True
         
         self.collection_name = collection_name
-        self.vector_size = 3072  # text-embedding-3-large dimension
-        self.model_name = "text-embedding-3-large"
         
         # 1. Initialize Qdrant (Local Storage — no Docker needed)
         local_path = os.path.join(os.path.dirname(__file__), "..", "..", "qdrant_data")
@@ -48,15 +47,39 @@ class CodeVectorStore:
         self.qdrant = QdrantClient(path=local_path)
         print(f"  [VectorStore] Using local Qdrant storage: {local_path}")
         
-        # 2. Initialize OpenAI for GitHub Models
-        api_key = os.environ.get("GITHUB_TOKEN")
-        if not api_key:
-            raise ValueError("GITHUB_TOKEN environment variable not set")
-            
-        self.ai_client = OpenAI(
-            base_url="https://models.github.ai/inference",
-            api_key=api_key,
-        )
+        # 2. Initialize Embedding Backend
+        # Priority: Gemini → GitHub Models
+        self.embedding_backend = None  # "gemini" or "github"
+        self.gemini_client = None
+        self.ai_client = None
+        
+        # Try Gemini first (generous free-tier: 1,500 RPM)
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                from google import genai
+                self.gemini_client = genai.Client(api_key=gemini_key)
+                self.embedding_backend = "gemini"
+                self.model_name = "gemini-embedding-001"
+                self.vector_size = 3072  # gemini-embedding-001 dimension
+                print(f"  [VectorStore] ✓ Using Gemini embeddings ({self.model_name}, dim={self.vector_size})")
+            except Exception as e:
+                print(f"  [VectorStore] ✗ Gemini embedding init failed: {e}")
+        
+        # Fallback to GitHub Models
+        if not self.embedding_backend:
+            from openai import OpenAI
+            api_key = os.environ.get("GITHUB_TOKEN")
+            if not api_key:
+                raise ValueError("No embedding API available: GEMINI_API_KEY and GITHUB_TOKEN not set")
+            self.ai_client = OpenAI(
+                base_url="https://models.github.ai/inference",
+                api_key=api_key,
+            )
+            self.embedding_backend = "github"
+            self.model_name = "text-embedding-3-large"
+            self.vector_size = 3072  # GitHub text-embedding-3-large dimension
+            print(f"  [VectorStore] Using GitHub Models embeddings ({self.model_name}, dim={self.vector_size})")
         
         # 3. Ensure collection exists
         self._ensure_collection()
@@ -67,7 +90,21 @@ class CodeVectorStore:
 
     def _ensure_collection(self):
         """Create Qdrant collection if it doesn't exist."""
-        if not self.qdrant.collection_exists(self.collection_name):
+        if self.qdrant.collection_exists(self.collection_name):
+            # Check if existing collection has matching vector size
+            info = self.qdrant.get_collection(self.collection_name)
+            existing_size = info.config.params.vectors.size
+            if existing_size != self.vector_size:
+                print(f"  [VectorStore] ⚠ Collection vector size mismatch ({existing_size} → {self.vector_size}). Recreating...")
+                self.qdrant.delete_collection(self.collection_name)
+                self.qdrant.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=self.vector_size,
+                        distance=models.Distance.COSINE
+                    )
+                )
+        else:
             self.qdrant.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
@@ -86,20 +123,64 @@ class CodeVectorStore:
         return str(uuid.UUID(hash_val))
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using GitHub Models API in batches."""
-        max_retries = 5
+        """Generate embeddings using the configured backend."""
+        if self.embedding_backend == "gemini":
+            return self._get_embeddings_gemini(texts)
+        else:
+            return self._get_embeddings_github(texts)
+
+    def _get_embeddings_gemini(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using Google Gemini API."""
         all_embeddings = []
-        batch_size = 1 # Process one by one to avoid 8k token limits across chunks
+        max_retries = 3
         
+        # Process one at a time for reliability
+        for i, text in enumerate(texts):
+            for attempt in range(max_retries):
+                try:
+                    result = self.gemini_client.models.embed_content(
+                        model=self.model_name,
+                        contents=text,
+                    )
+                    all_embeddings.append(result.embeddings[0].values)
+                    break
+                except Exception as e:
+                    error_str = str(e).lower()
+                    is_rate_limit = "429" in error_str or "rate" in error_str or "quota" in error_str
+                    
+                    if attempt == max_retries - 1:
+                        raise e
+                    
+                    if is_rate_limit:
+                        wait_time = min(60, 5 * (2 ** attempt))
+                        print(f"  [VectorStore] Gemini rate limited on text {i+1}/{len(texts)} (attempt {attempt+1}/{max_retries}). Waiting {wait_time}s...")
+                    else:
+                        wait_time = min(15, 2 * (2 ** attempt))
+                        print(f"  [VectorStore] Gemini embedding error (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+            
+            # Small delay between texts
+            if i + 1 < len(texts):
+                time.sleep(0.3)
+        
+        return all_embeddings
+
+    def _get_embeddings_github(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using GitHub Models API in batches (fallback)."""
+        max_retries = 6
+        all_embeddings = []
+        batch_size = 1
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i+batch_size]
+            batch_num = i // batch_size + 1
             for attempt in range(max_retries):
                 try:
                     response = self.ai_client.embeddings.create(
                         input=batch,
                         model=self.model_name
                     )
-                    # Extend properly since data comes sorted by default
                     all_embeddings.extend([data.embedding for data in response.data])
                     break
                 except Exception as e:
@@ -107,17 +188,16 @@ class CodeVectorStore:
                     is_rate_limit = "too many requests" in error_str or "rate limit" in error_str or "429" in error_str
                     if attempt == max_retries - 1:
                         raise e
-                    # Exponential backoff: 2s, 6s, 14s, 30s
-                    wait_time = min(30, 2 * (2 ** attempt))
                     if is_rate_limit:
-                        wait_time = min(60, 5 * (2 ** attempt))  # Longer waits for rate limits
-                        print(f"  [VectorStore] Rate limited (attempt {attempt+1}/{max_retries}). Waiting {wait_time}s...")
+                        wait_time = min(120, 10 * (2 ** attempt))
+                        print(f"  [VectorStore] Rate limited on batch {batch_num}/{total_batches} (attempt {attempt+1}/{max_retries}). Waiting {wait_time}s...")
                     else:
-                        print(f"  [VectorStore] Embedding error (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        wait_time = min(30, 2 * (2 ** attempt))
+                        print(f"  [VectorStore] Embedding error on batch {batch_num}/{total_batches} (attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
                     time.sleep(wait_time)
-            # Small delay between batches to avoid rate limits
+            # Delay between batches
             if i + batch_size < len(texts):
-                time.sleep(0.5)
+                time.sleep(2)
         return all_embeddings
 
     def index_file(self, file_path: str, code_content: Optional[str] = None) -> int:

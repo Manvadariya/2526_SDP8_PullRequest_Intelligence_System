@@ -1,0 +1,17 @@
+{
+  "job": {
+    "id": 40,
+    "repo_full_name": "Manvadariya/ai-review-test",
+    "pr_number": 22,
+    "commit_sha": "14b6fbb7f78cceca3a00ce070443760bbb2fa20b",
+    "status": "success",
+    "created_at": "2026-03-08T19:15:55.641541"
+  },
+  "results": [
+    {
+      "id": 32,
+      "agent_name": "reviewer",
+      "output_json": "{\"file_count\": 11, \"files\": [\".gitignore\", \".pr-reviewer.yml\", \"README.md\", \"big_data.py\", \"main.py\", \"new.java\", \"requirements.txt\", \"test.cpp\", \"tests/test_main.py\", \"todo_app.py\", \"verniable.py\"], \"clean_files\": 0, \"inline_comments\": 14, \"verdict\": \"REQUEST_CHANGES\", \"lint_issues\": 0, \"security_issues\": 0}"
+    }
+  ]
+}

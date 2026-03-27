@@ -15,15 +15,18 @@
  *   Repo stats            → 3 min
  */
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE } from '../config';
+
 
 // ─── helpers ────────────────────────────────────────────────────────
 const jsonOrThrow = async (res, label) => {
   if (!res.ok) throw new Error(`${label}: ${res.status}`);
   return res.json();
 };
+
 
 // ─── 1. User Repos (most reused – every page resolves owner from this) ──
 export function useUserRepos() {
@@ -36,6 +39,7 @@ export function useUserRepos() {
   });
 }
 
+
 // ─── 2. Activated Repos ─────────────────────────────────────────────
 export function useActivatedRepos() {
   const { authFetch } = useAuth();
@@ -46,27 +50,56 @@ export function useActivatedRepos() {
   });
 }
 
-// ─── 3. Jobs list ───────────────────────────────────────────────────
+
+// ─── 3. Jobs list (auto-polls every 3s when active jobs exist) ───────
 export function useJobs() {
   const { authFetch } = useAuth();
   return useQuery({
     queryKey: ['jobs'],
     queryFn: () => authFetch('/api/jobs').then(r => jsonOrThrow(r, 'jobs')),
-    staleTime: 60 * 1000,
+    staleTime: 3 * 1000,
+    refetchInterval: (query) => {
+      const jobs = query.state.data;
+      if (!Array.isArray(jobs)) return false;
+      const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'processing');
+      return hasActive ? 3000 : false;
+    },
   });
 }
 
-// ─── 4. Single Job detail ───────────────────────────────────────────
+
+// ─── 4. Single Job detail (auto-polls when job is active) ───────────
 export function useJobDetail(jobId) {
   const { authFetch } = useAuth();
   return useQuery({
     queryKey: ['job', jobId],
     queryFn: () => authFetch(`/api/jobs/${jobId}`).then(r => jsonOrThrow(r, `job-${jobId}`)),
     enabled: !!jobId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 3 * 1000,
     gcTime: 15 * 60 * 1000,
+    refetchInterval: (query) => {
+      const job = query.state.data;
+      if (!job) return false;
+      return (job.status === 'queued' || job.status === 'processing') ? 3000 : false;
+    },
   });
 }
+
+
+// ─── 4b. Active job lookup for a specific PR ────────────────────────
+export function useActiveJobForPR(repoFullName, prNumber) {
+  const { data: jobs = [] } = useJobs();
+  if (!repoFullName || !prNumber) return null;
+  return jobs.find(
+    j => j.repo_full_name === repoFullName &&
+      j.pr_number === prNumber &&
+      (j.status === 'queued' || j.status === 'processing')
+  ) || jobs.find(
+    j => j.repo_full_name === repoFullName &&
+      j.pr_number === prNumber
+  ) || null;
+}
+
 
 // ─── 5. PR list for a repo ──────────────────────────────────────────
 export function usePullRequests(owner, repo, state = 'open') {
@@ -81,6 +114,7 @@ export function usePullRequests(owner, repo, state = 'open') {
   });
 }
 
+
 // ─── 6. Single PR detail ────────────────────────────────────────────
 export function usePRDetail(owner, repo, number) {
   const { authFetch } = useAuth();
@@ -93,6 +127,7 @@ export function usePRDetail(owner, repo, number) {
     staleTime: 2 * 60 * 1000,
   });
 }
+
 
 // ─── 7. PR review data (our agent results) ──────────────────────────
 export function usePRReviewData(owner, repo, number) {
@@ -107,6 +142,7 @@ export function usePRReviewData(owner, repo, number) {
     gcTime: 15 * 60 * 1000,
   });
 }
+
 
 // ─── 8. PR comments ─────────────────────────────────────────────────
 export function usePRComments(owner, repo, number) {
@@ -124,6 +160,7 @@ export function usePRComments(owner, repo, number) {
   });
 }
 
+
 // ─── 9. Repo stats ─────────────────────────────────────────────────
 export function useRepoStatsQuery(owner, repo) {
   return useQuery({
@@ -138,18 +175,20 @@ export function useRepoStatsQuery(owner, repo) {
   });
 }
 
+
 // ─── Helper: resolve owner/repo from repoName param ────────────────
 export function useResolveRepo(repoName) {
   const { data: repos } = useUserRepos();
   if (!repos || !repoName) return { owner: null, repo: null, matched: null };
   const matched = repos.find(
     r => r.name.toLowerCase() === repoName.toLowerCase() ||
-         r.full_name.toLowerCase().includes(repoName.toLowerCase())
+      r.full_name.toLowerCase().includes(repoName.toLowerCase())
   );
   if (!matched) return { owner: null, repo: null, matched: null };
   const [owner, repo] = matched.full_name.split('/');
   return { owner, repo, matched };
 }
+
 
 // ─── Cache invalidation helpers ─────────────────────────────────────
 export function useInvalidateCache() {
@@ -161,3 +200,40 @@ export function useInvalidateCache() {
     invalidateAll: () => qc.invalidateQueries(),
   };
 }
+
+
+// ─── Mutation: Trigger Manual Review ────────────────────────────────
+export function useTriggerReview() {
+  const { authFetch } = useAuth();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ owner, repo, prNumber, commitSha }) => {
+      const res = await authFetch('/api/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: `${owner}/${repo}`,
+          pr_number: prNumber,
+          commit_sha: commitSha || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: 'Failed to trigger review' }));
+        throw new Error(error.detail || 'Failed to trigger review');
+      }
+
+      return res.json();
+    },
+    onSuccess: (data) => {
+      // Invalidate jobs list to show the new job
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      // Invalidate review data for this PR
+      qc.invalidateQueries({ queryKey: ['review-data'] });
+    },
+  });
+}
+
+
+

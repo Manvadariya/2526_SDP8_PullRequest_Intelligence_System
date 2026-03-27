@@ -191,8 +191,8 @@ async def trigger_manual_review(
     return {
         "status": "Review queued",
         "job_id": new_job.id,
-        "review_mode": app_config.REVIEW_MODE,
-        "llm_provider": app_config.LLM_PROVIDER,
+        "review_mode": getattr(app_config, 'REVIEW_MODE', 'full'),
+        "llm_provider": getattr(app_config, 'LLM_PROVIDER', 'groq'),
     }
 
 
@@ -334,12 +334,17 @@ async def get_repo_stats(
             # Extract inline comments as issues
             comments = []
             if isinstance(data, dict):
-                comments = data.get("inline_comments", []) or data.get("comments", [])
+                ic = data.get("inline_comments", [])
+                cm = data.get("comments", [])
+                comments = ic if isinstance(ic, list) else (cm if isinstance(cm, list) else [])
                 # If the agent stored a summary with issues
-                if data.get("issues"):
-                    comments.extend(data["issues"] if isinstance(data["issues"], list) else [])
+                issues = data.get("issues")
+                if isinstance(issues, list):
+                    comments.extend(issues)
                 # Track languages from file extensions
                 for c in comments:
+                    if not isinstance(c, dict):
+                        continue
                     path = c.get("path", "") or c.get("file", "")
                     if path:
                         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
@@ -352,6 +357,8 @@ async def get_repo_stats(
                             languages_seen.add(lang_map[ext])
 
             for c in comments:
+                if not isinstance(c, dict):
+                    continue
                 severity = (c.get("severity", "") or "").lower()
                 body = (c.get("body", "") or c.get("message", "") or "").lower()
 
@@ -1057,16 +1064,46 @@ async def get_pr_review_data(
 
         if not isinstance(data, dict):
             continue
+            
+        review_summaries = {
+            "file_summaries": data.get("file_summaries", {}),
+            "lgtm_notes": data.get("lgtm_notes", {}),
+            "markdown_summary": data.get("markdown_summary", "")
+        }
 
-        comments = data.get("inline_comments", []) or data.get("comments", [])
-        if data.get("issues"):
-            issues_list = data["issues"] if isinstance(data["issues"], list) else []
-            comments.extend(issues_list)
+        # The new schema stores comments as a dict of lists keyed by filepath
+        inline_comments_dict = data.get("inline_comments", {})
+        nitpicks_dict = data.get("nitpicks", {})
+        
+        # Helper to process a flat list or newly-structured dict-of-lists
+        def _extract_comments(source_data):
+            if isinstance(source_data, list):
+                return source_data
+            elif isinstance(source_data, dict):
+                flat_list = []
+                for _, file_items in source_data.items():
+                    if isinstance(file_items, list):
+                        flat_list.extend(file_items)
+                return flat_list
+            return []
 
-        for c in comments:
+        all_source_comments = _extract_comments(inline_comments_dict) + _extract_comments(nitpicks_dict)
+        
+        # Backwards compatibility check
+        if not all_source_comments:
+            legacy_comments = data.get("comments", []) or data.get("issues", [])
+            if isinstance(legacy_comments, list):
+                all_source_comments = legacy_comments
+
+        # Defensive check to ensure we definitively have a list before iterating
+        if not isinstance(all_source_comments, list):
+            all_source_comments = []
+
+        for c in all_source_comments:
             body = (c.get("body", "") or c.get("message", "") or "").strip()
             path = c.get("path", "") or c.get("file", "")
             severity = (c.get("severity", "") or "").lower()
+            finding_type = (c.get("type", "") or "").lower()
 
             # Determine language from file extension
             ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
@@ -1084,11 +1121,11 @@ async def get_pr_review_data(
 
             # Categorize
             body_lower = body.lower()
-            if any(kw in body_lower for kw in ("secret", "api key", "password", "credential")):
-                secrets_count += 1
-                category_counts["security"] += 1
-                cat = "Security"
-            elif any(kw in body_lower for kw in ("security", "vulnerab", "xss", "inject")):
+            if finding_type == "nitpick":
+                category_counts["style"] += 1
+                cat = "Nitpick / Style"
+            elif any(kw in body_lower for kw in ("secret", "api key", "password", "credential", "vulnerab", "xss")):
+                secrets_count += 1 if "secret" in body_lower or "api key" in body_lower else 0
                 category_counts["security"] += 1
                 cat = "Security"
             elif any(kw in body_lower for kw in ("performance", "slow", "optimize", "memory")):
@@ -1105,7 +1142,7 @@ async def get_pr_review_data(
                 cat = "Bug risk"
             else:
                 category_counts["anti_pattern"] += 1
-                cat = "Anti-pattern"
+                cat = "Code issue"
 
             all_comments.append({
                 "title": body[:120] if body else "Code issue",
@@ -1115,6 +1152,8 @@ async def get_pr_review_data(
                 "file": path,
                 "line": c.get("line", c.get("start_line", 0)),
                 "language": lang,
+                "original_code": c.get("original_code", ""),
+                "suggestion": c.get("suggestion", "")
             })
 
     # Compute dimension grades
@@ -1160,7 +1199,8 @@ async def get_pr_review_data(
         "has_review": True,
         "report_card": lang_issues,
         "secrets_count": secrets_count,
-        "feedback": all_comments[:10],
+        "feedback": all_comments,  # Return all findings, not just first 10
+        "review_summaries": review_summaries if 'review_summaries' in locals() else {},
         "dimensions": dimensions,
         "overall_grade": overall,
         "focus_area": focus_area,

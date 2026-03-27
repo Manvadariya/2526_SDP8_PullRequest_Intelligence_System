@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Check, X, Copy, Zap, Activity, ShieldAlert, GitPullRequest, MessageSquare, FileCode, ExternalLink, GitMerge, Clock, GitCommit } from 'lucide-react';
+import { ArrowLeft, Check, X, Copy, Zap, Activity, ShieldAlert, GitPullRequest, MessageSquare, FileCode, ExternalLink, GitMerge, Clock, GitCommit, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { useResolveRepo, usePRDetail as usePRDetailQuery, usePRReviewData, usePRComments } from '../hooks/useApiCache';
+import { useResolveRepo, usePRDetail as usePRDetailQuery, usePRReviewData, usePRComments, useTriggerReview } from '../hooks/useApiCache';
+
 
 // GitHub-style markdown + HTML renderer
 function MarkdownBody({ children }) {
   if (!children) return null;
+
 
   // Strip bot noise that can't render meaningfully:
   // - <details>...</details> blocks (bot footer badges/signatures)
@@ -24,7 +26,9 @@ function MarkdownBody({ children }) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+
   if (!cleaned) return null;
+
 
   return (
     <ReactMarkdown
@@ -130,6 +134,7 @@ function MarkdownBody({ children }) {
   );
 }
 
+
 export default function PRDetail() {
   const { repoName, prId } = useParams();
   const { owner: repoOwner, repo } = useResolveRepo(repoName);
@@ -138,6 +143,27 @@ export default function PRDetail() {
   const { data: comments = [], isLoading: commentsLoading, isError: commentsError } = usePRComments(repoOwner, repo, prId);
   const loading = prLoading || reviewLoading || commentsLoading;
   const [activeTab, setActiveTab] = useState('conversation');
+  const triggerReview = useTriggerReview();
+  const [isTriggering, setIsTriggering] = useState(false);
+
+
+  const handleTriggerReview = async () => {
+    setIsTriggering(true);
+    try {
+      await triggerReview.mutateAsync({
+        owner: repoOwner,
+        repo,
+        prNumber: parseInt(prId),
+        commitSha: prData?.head_sha,
+      });
+      alert(`✓ Review triggered for PR #${prId}`);
+    } catch (error) {
+      alert(`✗ Failed to trigger review: ${error.message}`);
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
 
   const timeAgo = (dateStr) => {
     if (!dateStr) return '';
@@ -153,6 +179,9 @@ export default function PRDetail() {
 
 
 
+
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center bg-[#0D1117] h-[calc(100vh-130px)] text-[#8B949E] text-sm">
@@ -161,15 +190,18 @@ export default function PRDetail() {
     );
   }
 
+
   const prTitle = prData?.title || 'PR Review';
   const prState = prData?.state || 'open';
   const hasReview = reviewData?.has_review || false;
   const feedbackIssues = reviewData?.feedback || [];
+  const reviewSummaries = reviewData?.review_summaries || {};
   const dimensions = reviewData?.dimensions || {};
   const overallGrade = reviewData?.overall_grade || '-';
   const focusArea = reviewData?.focus_area || 'None';
   const summary = reviewData?.summary || {};
   const files = prData?.files || [];
+
 
   // Grade bar renderer
   const GradeBar = ({ grade }) => {
@@ -183,16 +215,20 @@ export default function PRDetail() {
     );
   };
 
+
   const tabs = [
     { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} />, count: comments.length },
     { id: 'feedback', label: 'Feedback', icon: <Zap size={14} />, count: feedbackIssues.length },
     { id: 'changes', label: 'Files changed', icon: <FileCode size={14} />, count: files.length },
   ];
 
+
   // GitHub-style comment card component
   const CommentCard = ({ comment, action = 'commented', showAvatar = true }) => {
 
+
     const isBot = comment.author?.includes('[bot]') || comment.author?.includes('bot');
+
 
     return (
       <div className="flex gap-3">
@@ -203,14 +239,14 @@ export default function PRDetail() {
               <img src={comment.author_avatar} alt={comment.author}
                 className={`w-10 h-10 rounded-full border-2 ${isBot ? 'border-[#388bfd]' : 'border-[#30363D]'}`} />
             ) : (
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium ${
-                isBot ? 'bg-[#388bfd]/20 text-[#58a6ff] border-2 border-[#388bfd]' : 'bg-[#21262D] text-[#8B949E] border-2 border-[#30363D]'
-              }`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium ${isBot ? 'bg-[#388bfd]/20 text-[#58a6ff] border-2 border-[#388bfd]' : 'bg-[#21262D] text-[#8B949E] border-2 border-[#30363D]'
+                }`}>
                 {(comment.author || '?')[0].toUpperCase()}
               </div>
             )}
           </div>
         )}
+
 
         {/* Comment bubble */}
         <div className="flex-1 min-w-0">
@@ -249,10 +285,11 @@ export default function PRDetail() {
     );
   };
 
+
   return (
     <div className="bg-[#0D1117] h-[calc(100vh-130px)] overflow-hidden">
       <div className="max-w-[1400px] w-full mx-auto px-6 py-5 flex flex-col h-full overflow-hidden">
-        
+
         {/* Header */}
         <div className="shrink-0 mb-4">
           <div className="flex items-start gap-3 mb-3">
@@ -266,18 +303,17 @@ export default function PRDetail() {
                 <span className="text-xl text-[#8B949E] font-light">#{prId}</span>
               </div>
               <div className="flex items-center gap-3 mt-2">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                  prState === 'open'
-                    ? 'bg-[#238636]/20 text-[#3fb950] border border-[#238636]/40'
-                    : prData?.merged
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${prState === 'open'
+                  ? 'bg-[#238636]/20 text-[#3fb950] border border-[#238636]/40'
+                  : prData?.merged
                     ? 'bg-[#8957e5]/20 text-[#a371f7] border border-[#8957e5]/40'
                     : 'bg-[#da3633]/20 text-[#f85149] border border-[#da3633]/40'
-                }`}>
+                  }`}>
                   {prState === 'open'
                     ? <><GitPullRequest size={12} /> Open</>
                     : prData?.merged
-                    ? <><GitMerge size={12} /> Merged</>
-                    : <><X size={12} /> Closed</>
+                      ? <><GitMerge size={12} /> Merged</>
+                      : <><X size={12} /> Closed</>
                   }
                 </span>
                 <span className="text-sm text-[#8B949E]">
@@ -285,45 +321,69 @@ export default function PRDetail() {
                   {' '}wants to merge into{' '}
                   <code className="text-xs bg-[#161B22] px-1.5 py-0.5 rounded-md font-mono text-[#58a6ff] border border-[#30363D]">{prData?.base_branch || 'main'}</code>
                 </span>
-                {prData?.html_url && (
-                  <a href={prData.html_url} target="_blank" rel="noopener noreferrer"
-                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#21262D] border border-[#30363D] hover:bg-[#30363D] rounded-md text-xs text-[#8B949E] hover:text-[#E6EDF3] font-medium transition-colors">
-                    <ExternalLink size={12} /> GitHub
-                  </a>
-                )}
+                <div className="ml-auto flex items-center gap-2">
+                  {/* Trigger Review Button */}
+                  <button
+                    onClick={handleTriggerReview}
+                    disabled={isTriggering}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#238636] hover:bg-[#2ea043] border border-[#238636] rounded-md text-xs text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Trigger AI Review"
+                  >
+                    {isTriggering ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        Triggering...
+                      </>
+                    ) : (
+                      <>
+                        <Zap size={12} />
+                        Trigger Review
+                      </>
+                    )}
+                  </button>
+
+                  {/* GitHub Link */}
+                  {prData?.html_url && (
+                    <a href={prData.html_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262D] border border-[#30363D] hover:bg-[#30363D] rounded-md text-xs text-[#8B949E] hover:text-[#E6EDF3] font-medium transition-colors">
+                      <ExternalLink size={12} /> GitHub
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           </div>
           <div className="border-b border-[#21262D]"></div>
         </div>
 
+
         {/* Two-column layout: Main content + Right sidebar */}
         <div className="flex gap-6 flex-1 min-h-0 overflow-hidden">
-          
+
           {/* Main content area (wide) */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-            
+
             {/* Tab bar - GitHub style */}
             <div className="flex items-center gap-0 border-b border-[#21262D] shrink-0 mb-4">
               {tabs.map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[1px] ${
-                    activeTab === tab.id
-                      ? 'border-[#f78166] text-[#E6EDF3] bg-[#161B22]'
-                      : 'border-transparent text-[#8B949E] hover:text-[#E6EDF3] hover:border-[#30363D]'
-                  }`}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[1px] ${activeTab === tab.id
+                    ? 'border-[#f78166] text-[#E6EDF3] bg-[#161B22]'
+                    : 'border-transparent text-[#8B949E] hover:text-[#E6EDF3] hover:border-[#30363D]'
+                    }`}
                 >
                   {tab.icon}
                   {tab.label}
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    activeTab === tab.id ? 'bg-[#388bfd]/20 text-[#58a6ff]' : 'bg-[#21262D] text-[#8B949E]'
-                  }`}>{tab.count}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${activeTab === tab.id ? 'bg-[#388bfd]/20 text-[#58a6ff]' : 'bg-[#21262D] text-[#8B949E]'
+                    }`}>{tab.count}</span>
                 </button>
               ))}
             </div>
 
+
             {/* Scrollable tab content */}
             <div className="flex-1 overflow-y-auto min-h-0 pr-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363D #0D1117' }}>
+
 
               {/* Conversation Tab — GitHub-style timeline */}
               {activeTab === 'conversation' && (
@@ -355,6 +415,7 @@ export default function PRDetail() {
                       {/* Vertical timeline line */}
                       <div className="absolute left-[19px] top-10 bottom-0 w-[2px] bg-[#21262D]"></div>
 
+
                       <div className="space-y-4">
                         {/* General comments */}
                         {comments
@@ -363,6 +424,7 @@ export default function PRDetail() {
                             <CommentCard key={c.id} comment={c} action="commented" />
                           ))
                         }
+
 
                         {/* Inline review comments grouped by file */}
                         {Object.entries(
@@ -383,6 +445,7 @@ export default function PRDetail() {
                               </div>
                             </div>
 
+
                             <div className="flex-1 min-w-0 rounded-md border border-[#30363D] overflow-hidden">
                               {/* File header */}
                               <div className="flex items-center gap-2 px-4 py-2.5 bg-[#161B22] border-b border-[#30363D]">
@@ -390,6 +453,7 @@ export default function PRDetail() {
                                 <span className="text-sm font-mono text-[#58a6ff] truncate">{filepath}</span>
                                 <span className="text-xs text-[#484F58] ml-auto">{fileComments.length} comment{fileComments.length > 1 ? 's' : ''}</span>
                               </div>
+
 
                               {fileComments.map((c, ci) => {
                                 const isBot = c.author?.includes('[bot]') || c.author?.includes('bot');
@@ -405,17 +469,14 @@ export default function PRDetail() {
                                               const isAdd = !isHeader && line.startsWith('+');
                                               const isRemove = !isHeader && line.startsWith('-');
                                               return (
-                                                <tr key={li} className={`${
-                                                  isAdd ? 'bg-[#1a2f1a]' : isRemove ? 'bg-[#2d1b1b]' : isHeader ? 'bg-[#161B22]' : 'bg-[#0D1117]'
-                                                }`}>
-                                                  <td className={`select-none px-3 py-[1px] text-right w-10 border-r border-[#21262D] ${
-                                                    isAdd ? 'text-[#3fb950]/40' : isRemove ? 'text-[#f85149]/40' : 'text-[#484F58]'
+                                                <tr key={li} className={`${isAdd ? 'bg-[#1a2f1a]' : isRemove ? 'bg-[#2d1b1b]' : isHeader ? 'bg-[#161B22]' : 'bg-[#0D1117]'
                                                   }`}>
+                                                  <td className={`select-none px-3 py-[1px] text-right w-10 border-r border-[#21262D] ${isAdd ? 'text-[#3fb950]/40' : isRemove ? 'text-[#f85149]/40' : 'text-[#484F58]'
+                                                    }`}>
                                                     {isHeader ? '' : li}
                                                   </td>
-                                                  <td className={`px-3 py-[1px] whitespace-pre ${
-                                                    isAdd ? 'text-[#3fb950]' : isRemove ? 'text-[#f85149]' : isHeader ? 'text-[#58a6ff]' : 'text-[#8B949E]'
-                                                  }`}>
+                                                  <td className={`px-3 py-[1px] whitespace-pre ${isAdd ? 'text-[#3fb950]' : isRemove ? 'text-[#f85149]' : isHeader ? 'text-[#58a6ff]' : 'text-[#8B949E]'
+                                                    }`}>
                                                     {line}
                                                   </td>
                                                 </tr>
@@ -465,38 +526,143 @@ export default function PRDetail() {
                 </div>
               )}
 
+
               {/* Feedback Tab */}
               {activeTab === 'feedback' && (
                 <div className="pb-6">
-                  {feedbackIssues.length === 0 ? (
+                  {(!hasReview || (feedbackIssues.length === 0 && Object.keys(reviewSummaries.file_summaries || {}).length === 0 && Object.keys(reviewSummaries.lgtm_notes || {}).length === 0 && !reviewSummaries.markdown_summary)) ? (
                     <div className="flex flex-col items-center justify-center py-16 text-[#8B949E] text-sm gap-3">
                       <Zap size={32} className="opacity-30" />
                       {hasReview ? 'No issues found — great job!' : 'No review data available yet.'}
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {feedbackIssues.map((issue, idx) => (
-                        <div key={idx} className="rounded-md border border-[#30363D] overflow-hidden">
-                          <div className="flex items-center gap-3 px-4 py-3 bg-[#161B22]">
-                            <div className="w-6 h-6 rounded-full bg-[#d29922]/20 flex items-center justify-center shrink-0">
-                              <Zap size={12} className="text-[#d29922]" />
+                    <div className="space-y-6">
+
+                      {/* PR Report Card */}
+                      <div className="rounded-md border border-[#30363D] overflow-hidden bg-[#0D1117]">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-[#30363D]">
+                          <h2 className="text-xl font-bold text-[#E6EDF3]">AgenticPR Code Review</h2>
+                          <GradeBar grade={overallGrade} />
+                        </div>
+                        <div className="px-5 py-4 text-sm text-[#8B949E] border-b border-[#30363D] leading-relaxed">
+                          We reviewed changes in <code className="bg-[#161B22] border border-[#30363D] px-1.5 py-0.5 rounded text-[#E6EDF3] font-mono text-xs mx-0.5">{summary.commit_sha ? summary.commit_sha.substring(0, 7) : 'latest'}</code> on this pull request. Below is the summary for the review, and you can see the individual issues we found as inline review comments.
+                        </div>
+                        <div className="px-5 py-5">
+                          <h3 className="text-base font-bold text-[#E6EDF3] mb-4">PR Report Card</h3>
+                          <div className="grid grid-cols-[1fr_1fr] border border-[#30363D] rounded-md overflow-hidden bg-[#0D1117]">
+                            <div className="p-4 border-r border-[#30363D] flex items-start justify-between">
+                              <span className="font-bold text-[#E6EDF3] mt-1">Overall Grade</span>
+                              <GradeBar grade={overallGrade} />
                             </div>
-                            <h4 className="text-sm font-semibold text-[#E6EDF3]">{issue.title}</h4>
-                            {issue.file && (
-                              <span className="ml-auto text-xs font-mono text-[#8B949E] bg-[#0D1117] px-2 py-0.5 rounded border border-[#21262D]">
-                                {issue.file}{issue.line ? `:${issue.line}` : ''}
-                              </span>
-                            )}
-                          </div>
-                          <div className="px-4 py-3 bg-[#0D1117] text-sm text-[#8B949E] leading-relaxed">
-                            {issue.description}
+                            <div className="flex flex-col">
+                              {['Security', 'Reliability', 'Complexity', 'Hygiene'].map((dim, idx) => {
+                                const dimKey = dim.toLowerCase();
+                                const dimGrade = dimensions[dimKey]?.grade || '-';
+                                return (
+                                  <div key={idx} className={`p-4 flex items-center justify-between ${idx !== 0 ? 'border-t border-[#30363D]' : ''}`}>
+                                    <span className="font-semibold text-[#E6EDF3]">{dim}</span>
+                                    <GradeBar grade={dimGrade} />
+                                  </div>
+                                )
+                              })}
+                            </div>
                           </div>
                         </div>
-                      ))}
+                      </div>
+
+                      {/* Markdown Summary (Walkthrough & Checks) */}
+                      {reviewSummaries.markdown_summary && (
+                        <div className="rounded-md border border-[#30363D] overflow-hidden bg-[#0D1117]">
+                          <div className="px-5 py-6 text-sm text-[#E6EDF3] leading-relaxed markdown-body">
+                            <MarkdownBody>{reviewSummaries.markdown_summary}</MarkdownBody>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Overall File Summaries */}
+                      {reviewSummaries.file_summaries && Object.keys(reviewSummaries.file_summaries).length > 0 && (
+                        <div className="space-y-3">
+                          <h3 className="text-sm font-semibold text-[#E6EDF3] border-b border-[#30363D] pb-2">File Summaries</h3>
+                          {Object.entries(reviewSummaries.file_summaries).map(([file, summary], idx) => (
+                            <div key={`fs-${idx}`} className="rounded-md border border-[#30363D] overflow-hidden bg-[#0D1117]">
+                              <div className="px-4 py-2 bg-[#161B22] border-b border-[#30363D] font-mono text-xs text-[#E6EDF3]">
+                                📝 {file}
+                              </div>
+                              <div className="px-4 py-3 text-sm text-[#8B949E] leading-relaxed">
+                                {summary}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Positive Observations / LGTM */}
+                      {reviewSummaries.lgtm_notes && Object.keys(reviewSummaries.lgtm_notes).length > 0 && (
+                        <div className="space-y-3">
+                          <h3 className="text-sm font-semibold text-[#3fb950] border-b border-[#30363D] pb-2">Positive Observations</h3>
+                          {Object.entries(reviewSummaries.lgtm_notes).map(([file, note], idx) => (
+                            <div key={`lgtm-${idx}`} className="rounded-md border border-[#2ea043]/30 overflow-hidden bg-[#0D1117]">
+                              <div className="px-4 py-2 bg-[#2ea043]/10 border-b border-[#2ea043]/20 font-mono text-xs text-[#3fb950]">
+                                ✨ {file}
+                              </div>
+                              <div className="px-4 py-3 text-sm text-[#8B949E] leading-relaxed">
+                                {note}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Actionable Findings / Nitpicks */}
+                      {feedbackIssues.length > 0 && (
+                        <div className="space-y-3">
+                          <h3 className="text-sm font-semibold text-[#E6EDF3] border-b border-[#30363D] pb-2">Review Findings</h3>
+                          {feedbackIssues.map((issue, idx) => (
+                            <div key={`issue-${idx}`} className="rounded-md border border-[#30363D] overflow-hidden">
+                              <div className="flex items-start gap-3 px-4 py-3 bg-[#161B22]">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${issue.category?.toLowerCase().includes('security') || issue.category?.toLowerCase().includes('bug') ? 'bg-[#da3633]/20 text-[#f85149]' :
+                                  issue.category?.toLowerCase().includes('nitpick') || issue.category?.toLowerCase().includes('style') ? 'bg-[#3fb950]/20 text-[#3fb950]' :
+                                    'bg-[#d29922]/20 text-[#d29922]'
+                                  }`}>
+                                  {issue.category?.toLowerCase().includes('security') || issue.category?.toLowerCase().includes('bug') ? <AlertTriangle size={12} /> :
+                                    issue.category?.toLowerCase().includes('nitpick') || issue.category?.toLowerCase().includes('style') ? <CheckCircle2 size={12} /> :
+                                      <Zap size={12} />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                                    <h4 className="text-sm font-semibold text-[#E6EDF3] leading-snug">{issue.title}</h4>
+                                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border border-[#30363D] text-[#8B949E]">
+                                      {issue.category}
+                                    </span>
+                                  </div>
+                                  {issue.file && (
+                                    <div className="text-xs font-mono text-[#8B949E] opacity-80">
+                                      {issue.file}{issue.line ? `:${issue.line}` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="px-4 py-3 bg-[#0D1117] text-sm text-[#8B949E] leading-relaxed border-t border-[#21262D]">
+                                <MarkdownBody>{issue.description}</MarkdownBody>
+                                {issue.original_code && issue.suggestion && (
+                                  <div className="mt-3 pt-3 border-t border-[#21262D]">
+                                    <div className="text-xs font-semibold text-[#E6EDF3] mb-2">Suggested Fix</div>
+                                    <div className="bg-[#161B22] rounded overflow-hidden text-xs font-mono">
+                                      <div className="px-3 py-1.5 bg-[#da3633]/10 text-[#f85149] border-l-2 border-[#da3633] whitespace-pre-wrap">-{issue.original_code}</div>
+                                      <div className="px-3 py-1.5 bg-[#238636]/10 text-[#3fb950] border-l-2 border-[#238636] whitespace-pre-wrap">+{issue.suggestion}</div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
+
 
               {/* Changes Tab */}
               {activeTab === 'changes' && (
@@ -512,11 +678,10 @@ export default function PRDetail() {
                         <div key={idx} className="rounded-md border border-[#30363D] overflow-hidden">
                           <div className="flex items-center justify-between px-4 py-2.5 bg-[#161B22] border-b border-[#30363D]">
                             <div className="flex items-center gap-2">
-                              <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
-                                f.status === 'added' ? 'bg-[#238636]/20 text-[#3fb950]' :
+                              <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${f.status === 'added' ? 'bg-[#238636]/20 text-[#3fb950]' :
                                 f.status === 'removed' ? 'bg-[#da3633]/20 text-[#f85149]' :
-                                'bg-[#d29922]/20 text-[#d29922]'
-                              }`}>{f.status === 'modified' ? 'M' : f.status === 'added' ? 'A' : f.status === 'removed' ? 'D' : f.status?.[0]?.toUpperCase() || '?'}</span>
+                                  'bg-[#d29922]/20 text-[#d29922]'
+                                }`}>{f.status === 'modified' ? 'M' : f.status === 'added' ? 'A' : f.status === 'removed' ? 'D' : f.status?.[0]?.toUpperCase() || '?'}</span>
                               <span className="text-sm font-mono text-[#E6EDF3]">{f.filename}</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs font-mono">
@@ -528,11 +693,10 @@ export default function PRDetail() {
                             <pre className="px-4 py-2 text-xs font-mono text-[#8B949E] bg-[#0D1117] overflow-x-auto max-h-56 leading-relaxed"
                               style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363D #0D1117' }}>
                               {f.patch.split('\n').map((line, i) => (
-                                <div key={i} className={`px-1 ${
-                                  line.startsWith('+') ? 'text-[#3fb950] bg-[#1a2f1a]' :
+                                <div key={i} className={`px-1 ${line.startsWith('+') ? 'text-[#3fb950] bg-[#1a2f1a]' :
                                   line.startsWith('-') ? 'text-[#f85149] bg-[#2d1b1b]' :
-                                  line.startsWith('@@') ? 'text-[#58a6ff] bg-[#161B22]' : ''
-                                }`}>{line}</div>
+                                    line.startsWith('@@') ? 'text-[#58a6ff] bg-[#161B22]' : ''
+                                  }`}>{line}</div>
                               ))}
                             </pre>
                           )}
@@ -543,12 +707,15 @@ export default function PRDetail() {
                 </div>
               )}
 
+
             </div>
           </div>
+
 
           {/* Right Sidebar — Summary + Dimensions */}
           <div className="w-[300px] shrink-0 overflow-y-auto pl-6 border-l border-[#21262D]"
             style={{ scrollbarWidth: 'thin', scrollbarColor: '#30363D #0D1117' }}>
+
 
             {/* Summary section */}
             <div className="mb-6">
@@ -563,18 +730,16 @@ export default function PRDetail() {
                 <div className="flex items-center gap-3 text-sm">
                   <GitCommit size={14} className="text-[#484F58] shrink-0" />
                   <span className="text-[#8B949E] font-mono text-xs truncate">
-                    {(summary.commit_sha || prData?.head_sha || '').slice(0, 7)}
+                    {(summary.commit_sha || prData?.head_sha || '').slice(0, 8)}
                   </span>
                 </div>
                 <div className="flex items-center gap-3 text-sm">
                   {hasReview ? (
                     <>
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${
-                        summary.status === 'success' ? 'bg-[#3fb950]' : summary.status === 'failure' ? 'bg-[#f85149]' : 'bg-[#d29922]'
-                      }`}></div>
-                      <span className={`${
-                        summary.status === 'success' ? 'text-[#3fb950]' : summary.status === 'failure' ? 'text-[#f85149]' : 'text-[#d29922]'
-                      }`}>
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${summary.status === 'success' ? 'bg-[#3fb950]' : summary.status === 'failure' ? 'bg-[#f85149]' : 'bg-[#d29922]'
+                        }`}></div>
+                      <span className={`${summary.status === 'success' ? 'text-[#3fb950]' : summary.status === 'failure' ? 'text-[#f85149]' : 'text-[#d29922]'
+                        }`}>
                         {summary.status === 'success' ? 'Review completed' : summary.status === 'failure' ? 'Review failed' : 'Review in progress'}
                       </span>
                     </>
@@ -596,7 +761,9 @@ export default function PRDetail() {
               </div>
             </div>
 
+
             <div className="border-t border-[#21262D] my-4"></div>
+
 
             {/* Quality Overview */}
             <div className="mb-6">
@@ -613,7 +780,9 @@ export default function PRDetail() {
               </div>
             </div>
 
+
             <div className="border-t border-[#21262D] my-4"></div>
+
 
             {/* Dimensions */}
             <div>
@@ -626,9 +795,8 @@ export default function PRDetail() {
                   { key: 'hygiene', label: 'Hygiene', icon: <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1.51225 9.31996C1.90425 7.84996 3.10271 6.70837 4.62404 6.70837C6.05175 6.70837 7.00521 7.999 6.97371 9.42671L6.95708 10.176C6.95085 10.4551 7.00191 10.7325 7.10711 10.991C7.21231 11.2496 7.36941 11.4838 7.56871 11.6792L7.89129 11.996C8.35387 12.4501 8.08379 13.228 7.43775 13.2817C6.60183 13.3508 5.56817 13.4167 4.66662 13.4167C3.50521 13.4167 2.34408 13.3073 1.61871 13.2225C1.18937 13.1723 0.872624 12.806 0.913749 12.376C1.00708 11.3952 1.25617 10.2795 1.51225 9.31996Z" stroke="currentColor" strokeWidth="0.875" strokeLinecap="round" strokeLinejoin="round" /></svg> },
                   { key: 'coverage', label: 'Coverage', icon: <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 7.4375V11.8125C7 12.0446 6.90781 12.2671 6.74372 12.4312C6.57962 12.5953 6.35706 12.6875 6.125 12.6875C5.89294 12.6875 5.67038 12.5953 5.50628 12.4312C5.34219 12.2671 5.25 12.0446 5.25 11.8125M7 7.4375L6.73504 7.23871C6.32287 6.92964 5.81306 6.77959 5.29918 6.8161C4.78529 6.85262 4.30182 7.07325 3.9375 7.4375C3.76514 7.26513 3.56052 7.1284 3.33532 7.03512C3.11013 6.94183 2.86876 6.89382 2.625 6.89382C2.38124 6.89382 2.13987 6.94183 1.91468 7.03512C1.68948 7.1284 1.48486 7.26513 1.3125 7.4375C1.3125 4.29625 3.85875 1.75 7 1.75M7 7.4375L7.26496 7.23871C7.67713 6.92964 8.18694 6.77959 8.70082 6.8161C9.21471 6.85262 9.69818 7.07325 10.0625 7.4375C10.2349 7.26513 10.4395 7.1284 10.6647 7.03512C10.8899 6.94183 11.1312 6.89382 11.375 6.89382C11.6188 6.89382 11.8601 6.94183 12.0853 7.03512C12.3105 7.1284 12.5151 7.26513 12.6875 7.4375C12.6875 4.29625 10.1412 1.75 7 1.75M7 1.75V1.3125" stroke="currentColor" strokeWidth="0.875" strokeLinecap="round" strokeLinejoin="round" /></svg> },
                 ].map(dim => (
-                  <div key={dim.key} className={`flex justify-between items-center py-2 px-3 rounded-md hover:bg-[#161B22] transition-colors ${
-                    dim.key === 'coverage' ? 'opacity-50' : ''
-                  }`}>
+                  <div key={dim.key} className={`flex justify-between items-center py-2 px-3 rounded-md hover:bg-[#161B22] transition-colors ${dim.key === 'coverage' ? 'opacity-50' : ''
+                    }`}>
                     <div className="flex items-center gap-2 text-sm text-[#8B949E]">
                       {dim.icon}
                       <span>{dim.label}</span>
@@ -643,8 +811,13 @@ export default function PRDetail() {
             </div>
           </div>
 
+
         </div>
       </div>
     </div>
   );
 }
+
+
+
+

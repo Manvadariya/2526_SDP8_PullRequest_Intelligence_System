@@ -13,10 +13,11 @@ def remove_readonly(func, path, exc_info):
     func(path)
 
 class RepoManager:
-    def __init__(self, repo_url: str, commit_sha: str, token: str):
+    def __init__(self, repo_url: str, commit_sha: str, token: str, pr_number: int = None):
         # Embed token for auth
         self.repo_url = repo_url.replace("https://", f"https://x-access-token:{token}@")
         self.commit_sha = commit_sha
+        self.pr_number = pr_number
         
         # Ensure shared workspace exists
         if not os.path.exists(config.WORKSPACE_MOUNT_PATH):
@@ -35,13 +36,37 @@ class RepoManager:
                 check=True,
                 capture_output=True
             )
-            # 2. Checkout specific SHA
-            subprocess.run(
+            # 2. Try checkout; if it fails, fetch the PR ref and retry
+            result = subprocess.run(
                 ["git", "checkout", self.commit_sha], 
                 cwd=self.temp_dir, 
-                check=True,
                 capture_output=True
             )
+            if result.returncode != 0:
+                print(f" Commit not found on default branch, fetching PR ref...")
+                if self.pr_number:
+                    # Fetch the specific PR head ref
+                    subprocess.run(
+                        ["git", "fetch", "origin", f"pull/{self.pr_number}/head:pr-{self.pr_number}"],
+                        cwd=self.temp_dir,
+                        check=True,
+                        capture_output=True
+                    )
+                else:
+                    # Fetch all refs as fallback
+                    subprocess.run(
+                        ["git", "fetch", "--all"],
+                        cwd=self.temp_dir,
+                        check=True,
+                        capture_output=True
+                    )
+                # Retry checkout
+                subprocess.run(
+                    ["git", "checkout", self.commit_sha],
+                    cwd=self.temp_dir,
+                    check=True,
+                    capture_output=True
+                )
             return self.temp_dir
         except Exception as e:
             self.cleanup()

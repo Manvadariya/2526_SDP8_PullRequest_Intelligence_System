@@ -46,7 +46,7 @@ class Orchestrator:
                 
                 # 3. Clone Repo
                 repo_url = f"https://github.com/{metadata.repo_full_name}.git"
-                manager = RepoManager(repo_url, metadata.commit_sha, app_config.GITHUB_TOKEN)
+                manager = RepoManager(repo_url, metadata.commit_sha, app_config.GITHUB_TOKEN, pr_number=metadata.pr_number)
                 repo_path = manager.clone_and_checkout()
 
                 try:
@@ -505,7 +505,11 @@ class Orchestrator:
                             "file_count": len(file_diffs),
                             "files": list(file_diffs.keys()),
                             "clean_files": len(clean_files),
-                            "inline_comments": len(inline_comments),
+                            "inline_comments": all_raw_findings,
+                            "nitpicks": all_nitpicks,
+                            "file_summaries": file_summaries,
+                            "lgtm_notes": lgtm_notes,
+                            "markdown_summary": full_body,
                             "verdict": verdict,
                             "lint_issues": len(lint_results.get("details", [])),
                             "security_issues": len(sec_results.get("details", []))

@@ -1,49 +1,121 @@
+import time
+import traceback
 from openai import OpenAI
 from config import config
 
+
 class LLMService:
+    """
+    Multi-provider LLM Service with automatic fallback chain:
+      1. Groq (fastest, free)
+      2. Gemini (reliable, Google)
+      3. OpenRouter (broad model selection)
+    
+    If a provider fails or returns empty, automatically tries the next one.
+    """
+    
     def __init__(self):
-        self.provider = config.LLM_PROVIDER.lower()
+        self.provider = config.LLM_PROVIDER.lower()  # kept for backward compat
+        self._failed_providers = set()  # Track providers that failed this session
         
-        if self.provider == "gemini":
-            from google import genai
-            self.gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
-            self.model = config.GEMINI_MODEL
-            self.client = None  # No OpenAI client for Gemini
-            print(f"  [LLM] Using Gemini provider with model: {self.model}")
+        # --- Initialize ALL available providers ---
+        
+        # 1. Groq (Primary)
+        self.groq_client = None
+        self.groq_model = config.GROQ_MODEL
+        if config.GROQ_API_KEY:
+            try:
+                from groq import Groq
+                self.groq_client = Groq(api_key=config.GROQ_API_KEY)
+                print(f"  [LLM] ✓ Groq ready (model: {self.groq_model})")
+            except Exception as e:
+                print(f"  [LLM] ✗ Groq init failed: {e}")
         else:
-            # Default: OpenRouter via OpenAI-compatible SDK
-            self.client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=config.OPENROUTER_API_KEY
-            )
-            self.model = config.MODEL
-            self.gemini_client = None
-            print(f"  [LLM] Using OpenRouter provider with model: {self.model}")
+            print("  [LLM] ✗ Groq not configured (no GROQ_API_KEY)")
+        
+        # 2. Gemini
+        self.gemini_client = None
+        self.gemini_model = config.GEMINI_MODEL
+        if config.GEMINI_API_KEY:
+            try:
+                from google import genai
+                self.gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
+                print(f"  [LLM] ✓ Gemini ready (model: {self.gemini_model})")
+            except Exception as e:
+                print(f"  [LLM] ✗ Gemini init failed: {e}")
+        else:
+            print("  [LLM] ✗ Gemini not configured (no GEMINI_API_KEY)")
+        
+        # 3. OpenRouter
+        self.openrouter_client = None
+        self.openrouter_model = config.MODEL
+        if config.OPENROUTER_API_KEY:
+            try:
+                self.openrouter_client = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=config.OPENROUTER_API_KEY
+                )
+                print(f"  [LLM] ✓ OpenRouter ready (model: {self.openrouter_model})")
+            except Exception as e:
+                print(f"  [LLM] ✗ OpenRouter init failed: {e}")
+        else:
+            print("  [LLM] ✗ OpenRouter not configured (no OPENROUTER_API_KEY)")
+        
+        # Legacy alias for backward compat
+        self.client = self.openrouter_client
+        self.model = self.openrouter_model
 
     def chat(self, messages: list, temperature: float = 0.7, max_tokens: int = None, response_format: dict = None) -> str:
         """
-        Unified chat method that works with both OpenRouter and Gemini.
+        Unified chat with automatic fallback: Groq → Gemini → OpenRouter.
         
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys.
-                      Roles: 'system', 'user', 'assistant'
-            temperature: Sampling temperature (0.0 - 1.0)
-            max_tokens: Max tokens in response (optional)
-            response_format: OpenAI-style response format, e.g. {"type": "json_object"}
-            
-        Returns:
-            The text content of the LLM response.
+        If a provider fails, it's skipped for subsequent calls in this session.
         """
-        if self.provider == "gemini":
-            return self._chat_gemini(messages, temperature, max_tokens, response_format)
-        else:
-            return self._chat_openrouter(messages, temperature, max_tokens, response_format)
+        # Build provider chain in priority order
+        providers = []
+        if self.groq_client and "groq" not in self._failed_providers:
+            providers.append(("groq", self._chat_groq))
+        if self.gemini_client and "gemini" not in self._failed_providers:
+            providers.append(("gemini", self._chat_gemini))
+        if self.openrouter_client and "openrouter" not in self._failed_providers:
+            providers.append(("openrouter", self._chat_openrouter))
+        
+        # Also add failed providers at the end as last resort
+        if self.groq_client and "groq" in self._failed_providers:
+            providers.append(("groq", self._chat_groq))
+        if self.gemini_client and "gemini" in self._failed_providers:
+            providers.append(("gemini", self._chat_gemini))
+        if self.openrouter_client and "openrouter" in self._failed_providers:
+            providers.append(("openrouter", self._chat_openrouter))
+        
+        if not providers:
+            print("  [LLM] ❌ No LLM providers available!")
+            return ""
+        
+        for provider_name, chat_fn in providers:
+            try:
+                result = chat_fn(messages, temperature, max_tokens, response_format)
+                if result:
+                    # Success — un-fail this provider if it was marked
+                    if provider_name in self._failed_providers:
+                        print(f"  [LLM] ✓ {provider_name} recovered!")
+                        self._failed_providers.discard(provider_name)
+                    return result
+                else:
+                    print(f"  [LLM] ⚠ {provider_name} returned empty response, trying next provider...")
+            except Exception as e:
+                print(f"  [LLM] ❌ {provider_name} failed: {e}")
+                self._failed_providers.add(provider_name)
+                continue
+        
+        print(f"  [LLM] ❌ All providers failed!")
+        return ""
 
-    def _chat_openrouter(self, messages: list, temperature: float, max_tokens: int, response_format: dict) -> str:
-        """Send chat to OpenRouter via OpenAI SDK."""
+    # ─── GROQ ──────────────────────────────────────────────────
+    def _chat_groq(self, messages: list, temperature: float, max_tokens: int, response_format: dict) -> str:
+        """Send chat to Groq API."""
         kwargs = {
-            "model": self.model,
+            "model": self.groq_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -52,17 +124,34 @@ class LLMService:
         if response_format:
             kwargs["response_format"] = response_format
         
-        response = self.client.chat.completions.create(**kwargs)
-        
-        if not response.choices or not response.choices[0].message.content:
-            return ""
-        return response.choices[0].message.content.strip()
+        max_retries = 2
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.groq_client.chat.completions.create(**kwargs)
+                
+                if not response.choices or not response.choices[0].message.content:
+                    self._log_empty_response("Groq", self.groq_model, response, attempt, max_retries)
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                    return ""
+                
+                return response.choices[0].message.content.strip()
+                
+            except Exception as e:
+                print(f"  [LLM] ❌ Groq error (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                else:
+                    raise  # Let the fallback chain catch it
 
+        return ""
+
+    # ─── GEMINI ────────────────────────────────────────────────
     def _chat_gemini(self, messages: list, temperature: float, max_tokens: int, response_format: dict) -> str:
         """Send chat to Google Gemini."""
         from google.genai import types
         
-        # Separate system prompt from conversation messages
         system_instruction = None
         contents = []
         
@@ -71,7 +160,6 @@ class LLMService:
             content = msg.get("content", "")
             
             if role == "system":
-                # Gemini uses system_instruction instead of a system message
                 system_instruction = content
             elif role == "assistant":
                 contents.append(types.Content(
@@ -79,20 +167,14 @@ class LLMService:
                     parts=[types.Part.from_text(text=content)]
                 ))
             else:
-                # user messages
                 contents.append(types.Content(
                     role="user",
                     parts=[types.Part.from_text(text=content)]
                 ))
         
-        # Build generation config
-        config_kwargs = {
-            "temperature": temperature,
-        }
+        config_kwargs = {"temperature": temperature}
         if max_tokens:
             config_kwargs["max_output_tokens"] = max_tokens
-        
-        # Map response_format to Gemini's response_mime_type
         if response_format and response_format.get("type") == "json_object":
             config_kwargs["response_mime_type"] = "application/json"
         
@@ -102,7 +184,7 @@ class LLMService:
         )
         
         response = self.gemini_client.models.generate_content(
-            model=self.model,
+            model=self.gemini_model,
             contents=contents,
             config=gen_config,
         )
@@ -111,10 +193,55 @@ class LLMService:
             return ""
         return response.text.strip()
 
+    # ─── OPENROUTER ────────────────────────────────────────────
+    def _chat_openrouter(self, messages: list, temperature: float, max_tokens: int, response_format: dict) -> str:
+        """Send chat to OpenRouter via OpenAI SDK with diagnostic logging."""
+        kwargs = {
+            "model": self.openrouter_model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if response_format:
+            kwargs["response_format"] = response_format
+        
+        max_retries = 2
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.openrouter_client.chat.completions.create(**kwargs)
+                
+                if not response.choices or not response.choices[0].message.content:
+                    self._log_empty_response("OpenRouter", self.openrouter_model, response, attempt, max_retries)
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                    return ""
+                
+                return response.choices[0].message.content.strip()
+                
+            except Exception as e:
+                print(f"  [LLM] ❌ OpenRouter error (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                else:
+                    raise  # Let the fallback chain catch it
+        
+        return ""
+
+    # ─── HELPERS ───────────────────────────────────────────────
+    def _log_empty_response(self, provider: str, model: str, response, attempt: int, max_retries: int):
+        """Log diagnostic info when a response is empty."""
+        print(f"  [LLM] ⚠ Empty response from {provider}/{model} (attempt {attempt}/{max_retries}):")
+        print(f"    Choices count: {len(response.choices) if response.choices else 0}")
+        if response.choices:
+            choice = response.choices[0]
+            print(f"    Finish reason: {getattr(choice, 'finish_reason', 'unknown')}")
+            print(f"    Content: {repr(choice.message.content) if choice.message else 'no message'}")
+        print(f"    Usage: {getattr(response, 'usage', 'unknown')}")
+
     def generate_summary(self, diff_text: str, title: str) -> dict:
-        """
-        Generates a summary using the LLM.
-        """
+        """Generates a summary using the LLM."""
         prompt = f"""
         Analyze this Git Diff for PR: "{title}"
         

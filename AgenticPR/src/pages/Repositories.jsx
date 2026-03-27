@@ -30,29 +30,32 @@ export default function Repositories() {
 
   const filteredRepos = repos.filter(repo => {
     const matchesSearch = repo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (repo.description || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (repo.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesLang = filterLang === "All" || repo.language === filterLang;
     return matchesSearch && matchesLang;
   });
 
   const timeAgo = (dateStr) => {
     if (!dateStr) return '';
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
   };
 
   return (
     <div className="flex-1 bg-[#0d1117] h-full flex flex-col min-w-0">
       <div className="border-b border-[#30363d] bg-[#0d1117] px-6 py-4 flex items-center justify-between shrink-0">
-        <h1 className="text-xl font-semibold text-white">
-          Repositories
-          {!loading && <span className="ml-2 text-sm font-normal text-gray-500">({repos.length})</span>}
-        </h1>
+        <div className="flex items-center gap-3">
+          <Link to="/home" className="text-gray-400 hover:text-white transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          </Link>
+          <h1 className="text-xl font-semibold text-white">
+            Repositories
+            {!loading && <span className="ml-2 text-sm font-normal text-gray-500">({repos.length})</span>}
+          </h1>
+        </div>
       </div>
 
       <div className="p-6 flex-1 overflow-y-auto">
@@ -120,7 +123,7 @@ export default function Repositories() {
                     </div>
                     <div className="flex-1 min-w-0 pr-4">
                       <div className="flex items-center gap-2 mb-1">
-                        <Link to={`/scan?repo=${repo.full_name}`} className="text-base font-semibold text-[#58a6ff] hover:underline cursor-pointer">
+                        <Link to={`/repositories/${encodeURIComponent(repo.name)}`} className="text-base font-semibold text-[#58a6ff] hover:underline cursor-pointer">
                           {repo.full_name}
                         </Link>
                         {repo.private && (
@@ -150,10 +153,10 @@ export default function Repositories() {
 
                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Link
-                        to={`/scan?repo=${repo.full_name}`}
+                        to={`/repositories/${encodeURIComponent(repo.name)}`}
                         className="bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-xs font-medium text-gray-300 px-3 py-1.5 rounded-md transition-colors"
                       >
-                        Analyze
+                        View Details
                       </Link>
                     </div>
                   </div>

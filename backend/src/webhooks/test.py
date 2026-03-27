@@ -1,22 +1,18 @@
-import requests
-import json
+from groq import Groq
 
-response = requests.post(
-  url="https://openrouter.ai/api/v1/chat/completions",
-  headers={
-    "Authorization": "Bearer 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",
-  },
-  data=json.dumps({
-    "model": "stepfun/step-3.5-flash:free",
-    "messages": [
-      {
-        "role": "user",
-        "content": "What is the meaning of life?"
-      }
-    ]
-  }),
-  timeout=30
+# Add your Groq API key
+client = Groq(
+    api_key="..."
 )
 
-print(response.status_code)
-print(response.text)
+response = client.chat.completions.create(
+    model="openai/gpt-oss-120b",   # free Groq model
+    messages=[
+        {"role": "system", "content": "You are a helpful AI assistant."},
+        {"role": "user", "content": "Explain ensemble learning in simple terms."}
+    ],
+    temperature=0.7,
+    max_tokens=512
+)
+
+print(response.choices[0].message.content)
