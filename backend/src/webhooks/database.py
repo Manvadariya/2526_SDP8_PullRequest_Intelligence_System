@@ -3,30 +3,58 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 import os
+import logging
+import asyncio
 
-# Default: SQLite (always works, no Docker needed)
-# To use Postgres: set DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/pr_bot_db
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./database.db")
+logger = logging.getLogger("agenticpr.database")
+
+# ─── Database URL Configuration ─────────────────────────────────
+# Production: Postgres (required for concurrent access, UNIQUE constraints, scaling)
+# Development: SQLite fallback (set DEV_MODE=true to use SQLite)
+#
+# Examples:
+#   DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/agenticpr_db
+#   DATABASE_URL=sqlite+aiosqlite:///./database.db
+
+DEV_MODE = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+PRODUCTION = os.getenv("PRODUCTION", "").lower() in ("true", "1", "yes")
+
+# Default to Postgres in production, SQLite in dev
+if DEV_MODE:
+    _default_url = "sqlite+aiosqlite:///./database.db"
+else:
+    _default_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://prbot:prbot@localhost:5432/pr_bot_db"
+    )
+
+DATABASE_URL = os.getenv("DATABASE_URL", _default_url)
+
+# Warn if using SQLite in production
+if PRODUCTION and "sqlite" in DATABASE_URL:
+    logger.warning("⚠ SQLite detected in production — this is NOT safe for concurrent access!")
+    logger.warning("  Set DATABASE_URL to a Postgres connection string.")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
-import asyncio
 
 async def init_db():
+    """Initialize database tables with retry logic."""
     retries = 5
     for i in range(retries):
         try:
             async with engine.begin() as conn:
-                # This creates the tables if they don't exist
+                # This creates tables if they don't exist
                 await conn.run_sync(SQLModel.metadata.create_all)
-            print("  [Database] Connected and initialized.")
+            logger.info(f"Database connected and initialized ({DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'local'})")
             return
         except Exception as e:
             if i == retries - 1:
-                print(f" [Database] Failed to connect after {retries} attempts: {e}")
+                logger.error(f"Database connection failed after {retries} attempts: {e}")
                 raise e
-            print(f" [Database] Connection failed ({e}). Retrying in 2s... ({i+1}/{retries})")
+            logger.warning(f"Database connection failed ({e}). Retrying in 2s... ({i+1}/{retries})")
             await asyncio.sleep(2)
+
 
 async def get_session() -> AsyncSession:
     async_session = sessionmaker(

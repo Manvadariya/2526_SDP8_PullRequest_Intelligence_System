@@ -41,13 +41,29 @@ def _cfg(key: str, default: str = "") -> str:
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 72  # 3 days
-# JWT_SECRET is fixed once per process startup (intentional — tokens must stay valid)
 _JWT_SECRET: Optional[str] = None
 
+PRODUCTION = os.getenv("PRODUCTION", "").lower() in ("true", "1", "yes")
+
 def _jwt_secret() -> str:
+    """Get JWT secret. Required in production; auto-generated (with warning) in dev."""
     global _JWT_SECRET
     if _JWT_SECRET is None:
-        _JWT_SECRET = os.getenv("JWT_SECRET") or secrets.token_hex(32)
+        env_secret = os.getenv("JWT_SECRET")
+        if env_secret:
+            _JWT_SECRET = env_secret
+        elif PRODUCTION:
+            raise RuntimeError(
+                "JWT_SECRET environment variable is REQUIRED in production. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        else:
+            _JWT_SECRET = secrets.token_hex(32)
+            import logging
+            logging.getLogger("agenticpr.auth").warning(
+                "⚠ JWT_SECRET not set — auto-generated for dev. "
+                "Set JWT_SECRET env var for production!"
+            )
     return _JWT_SECRET
 
 
@@ -108,7 +124,7 @@ async def get_current_user(
 async def github_login():
     """Redirect user to GitHub OAuth authorization page."""
     client_id = _cfg("GITHUB_CLIENT_ID")
-    frontend_url = _cfg("FRONTEND_URL", "http://localhost:5173")
+    frontend_url = _cfg("FRONTEND_URL", "http://localhost:8080")
     if not client_id:
         raise HTTPException(status_code=500, detail="GITHUB_CLIENT_ID not configured")
     

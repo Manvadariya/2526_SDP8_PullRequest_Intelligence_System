@@ -1,7 +1,11 @@
 import httpx
 import requests
 import base64
+import asyncio
+import logging
 from config import config
+
+logger = logging.getLogger("agenticpr.github")
 
 # This hidden signature allows us to find our own comments
 BOT_SIGNATURE = "<!-- SapientPR-Review AXIOM_ULTRA -->"
@@ -14,14 +18,39 @@ class GitHubClient:
             "Accept": "application/vnd.github.v3+json"
         }
 
+    async def _request_with_backoff(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """Executes httpx request with exponential backoff for GitHub rate limits."""
+        max_retries = 5
+        base_delay = 2
+        
+        async with httpx.AsyncClient() as client:
+            for attempt in range(max_retries):
+                resp = await client.request(method, url, **kwargs)
+                
+                # Check for rate limiting (403 with specific header or 429)
+                if resp.status_code == 429 or (resp.status_code == 403 and "x-ratelimit-remaining" in resp.headers and resp.headers.get("x-ratelimit-remaining") == "0") or (resp.status_code == 403 and "secondary rate limit" in resp.text.lower()):
+                    
+                    delay = base_delay * (2 ** attempt)
+                    # Check if GitHub provided a Retry-After header
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after and retry_after.isdigit():
+                        delay = max(delay, int(retry_after))
+                    
+                    if attempt < max_retries - 1:
+                        logger.warning(f"GitHub Rate Limit hit on {url}. Backing off for {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                        
+                resp.raise_for_status()
+                return resp
+        raise Exception(f"Failed after {max_retries} attempts")
+
     async def get_pr_diff(self, repo: str, pr_number: int) -> str:
         url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
         headers = self.headers.copy()
         headers["Accept"] = "application/vnd.github.v3.diff"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.text
+        resp = await self._request_with_backoff("GET", url, headers=headers)
+        return resp.text
 
     # --- NEW: Smart Commenting Logic ---
     async def post_or_update_comment(self, repo: str, pr_number: int, body: str):
@@ -41,10 +70,10 @@ class GitHubClient:
     async def _find_bot_comment(self, repo: str, pr_number: int) -> int:
         """Finds the first comment on the PR containing our signature."""
         url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=self.headers)
-            if resp.status_code != 200:
-                return None
+        try:
+            resp = await self._request_with_backoff("GET", url, headers=self.headers)
+        except Exception:
+            return None
             
             comments = resp.json()
             for comment in comments:
@@ -55,13 +84,11 @@ class GitHubClient:
 
     async def _post_comment(self, repo: str, pr_number: int, body: str):
         url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json={"body": body}, headers=self.headers)
+        await self._request_with_backoff("POST", url, json={"body": body}, headers=self.headers)
 
     async def _update_comment(self, repo: str, comment_id: int, body: str):
         url = f"https://api.github.com/repos/{repo}/issues/comments/{comment_id}"
-        async with httpx.AsyncClient() as client:
-            await client.patch(url, json={"body": body}, headers=self.headers)
+        await self._request_with_backoff("PATCH", url, json={"body": body}, headers=self.headers)
 
     # --- NEW: Post multiple file-specific comments ---
     async def post_file_reviews(self, repo: str, pr_number: int, file_reviews: dict):
@@ -95,77 +122,72 @@ class GitHubClient:
                                   event: str = "COMMENT"):
         """
         Posts a PR review with inline comments on specific diff lines.
-        Uses: POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
-        
-        inline_comments: [{"path": "file.py", "line": 14, "side": "RIGHT", "body": "..."}]
-        event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE"
         """
         url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/reviews"
-
         payload = {
             "commit_id": commit_sha,
+            "body": f"{summary_body}\n\n{BOT_SIGNATURE}" if summary_body else BOT_SIGNATURE,
             "event": event,
             "comments": inline_comments
         }
-        if summary_body:
-            payload["body"] = summary_body + f"\n\n{BOT_SIGNATURE}"
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload, headers=self.headers)
+        
+        try:
+            resp = await self._request_with_backoff("POST", url, json=payload, headers=self.headers)
             
-            # 1. Success Case
             if resp.status_code in (200, 201):
-                print(f" Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
+                logger.info(f"Posted inline review: {len(inline_comments)} inline comment(s), event={event}")
                 return True
             
-            # 2. Specific Error: Self-Review Restriction
             if resp.status_code == 422 and "request changes on your own pull request" in resp.text:
-                print(f" Cannot request changes on own PR. Retrying with COMMENT event...")
+                logger.warning(f"Cannot request changes on own PR. Retrying with COMMENT event...")
                 payload["event"] = "COMMENT"
-                resp = await client.post(url, json=payload, headers=self.headers)
+                resp = await self._request_with_backoff("POST", url, json=payload, headers=self.headers)
                 if resp.status_code in (200, 201):
-                    print(f" Retry success: Posted as COMMENT.")
+                    logger.info(f"Retry success: Posted as COMMENT.")
                     return True
             
-            # 3. Failure Case
-            print(f" Inline review failed ({resp.status_code}): {resp.text[:500]}")
-            # Fallback: post as regular issue comment
-            fallback = summary_body + "\n\n" if summary_body else ""
-            if inline_comments:
-                fallback += "###  Inline Comments (Fallback)\n"
-                for c in inline_comments:
-                    fallback += f"- **{c['path']}** (Line {c['line']}): {c['body']}\n"
+        except Exception as e:
+            logger.warning(f"Inline review failed: {e}")
             
-            await self.post_or_update_comment(repo, pr_number, fallback)
-            return False
+        # Fallback: post as regular issue comment
+        fallback = summary_body + "\n\n" if summary_body else ""
+        if inline_comments:
+            fallback += "###  Inline Comments (Fallback)\n"
+            for c in inline_comments:
+                fallback += f"- **{c.get('path', 'unknown')}** (Line {c.get('line', '?')}): {c.get('body', '')}\n"
+        
+        await self.post_or_update_comment(repo, pr_number, fallback)
+        return False
 
-    # --- Standard Utils (Unchanged) ---
     async def add_label(self, repo: str, pr_number: int, label: str):
         url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/labels"
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json={"labels": [label]}, headers=self.headers)
+        await self._request_with_backoff("POST", url, json={"labels": [label]}, headers=self.headers)
 
     async def get_file_content(self, repo: str, path: str, ref: str) -> str:
         url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=self.headers)
-            if resp.status_code == 404:
-                return None
+        try:
+            resp = await self._request_with_backoff("GET", url, headers=self.headers)
             data = resp.json()
             return base64.b64decode(data["content"]).decode("utf-8")
+        except Exception:
+            return None
 
-    async def set_commit_status(self, repo: str, sha: str, state: str, description: str, target_url: str = ""):
+    # --- NEW: Commit Status Updates ---
+    async def set_commit_status(self, repo: str, sha: str, state: str, description: str, context: str = "AgenticPR Review"):
+        """
+        Updates the GitHub commit status (pending, success, error, failure).
+        """
         url = f"https://api.github.com/repos/{repo}/statuses/{sha}"
         payload = {
-            "state": state,
-            "description": description[:140],
-            "context": "SapientPR Reviewer"
+            "state": state,  # "pending", "success", "error", "failure"
+            "description": description[:140],  # GitHub max description length is 140
+            "context": context
         }
-        if target_url:
-            payload["target_url"] = target_url
-            
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, headers=self.headers)
+        try:
+            await self._request_with_backoff("POST", url, json=payload, headers=self.headers)
+            logger.info(f"Set commit status for {sha[:7]} to {state}: {description}")
+        except Exception as e:
+            logger.error(f"Failed to set commit status: {e}")
 
     # --- NEW: Synchronous Batch Review (for sync Agents) ---
     def post_batch_review(self, repo: str, pr_number: int, commit_id: str, summary: str, comments: list, action: str = "COMMENT"):

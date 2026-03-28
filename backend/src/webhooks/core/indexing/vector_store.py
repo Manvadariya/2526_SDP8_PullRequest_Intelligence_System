@@ -41,11 +41,16 @@ class CodeVectorStore:
         
         self.collection_name = collection_name
         
-        # 1. Initialize Qdrant (Local Storage — no Docker needed)
-        local_path = os.path.join(os.path.dirname(__file__), "..", "..", "qdrant_data")
-        os.makedirs(local_path, exist_ok=True)
-        self.qdrant = QdrantClient(path=local_path)
-        print(f"  [VectorStore] Using local Qdrant storage: {local_path}")
+        # 1. Initialize Qdrant
+        qdrant_url = os.environ.get("QDRANT_URL")
+        if qdrant_url:
+            self.qdrant = QdrantClient(url=qdrant_url)
+            print(f"  [VectorStore] Using remote Qdrant storage: {qdrant_url}")
+        else:
+            local_path = os.path.join(os.path.dirname(__file__), "..", "..", "qdrant_data")
+            os.makedirs(local_path, exist_ok=True)
+            self.qdrant = QdrantClient(path=local_path)
+            print(f"  [VectorStore] Using local Qdrant storage: {local_path}")
         
         # 2. Initialize Embedding Backend
         # Priority: Gemini → GitHub Models
@@ -90,7 +95,13 @@ class CodeVectorStore:
 
     def _ensure_collection(self):
         """Create Qdrant collection if it doesn't exist."""
-        if self.qdrant.collection_exists(self.collection_name):
+        try:
+            exists = self.qdrant.collection_exists(self.collection_name)
+        except Exception:
+            # Handle cases where the collection might already exist but existence check fails
+            exists = False
+
+        if exists:
             # Check if existing collection has matching vector size
             info = self.qdrant.get_collection(self.collection_name)
             existing_size = info.config.params.vectors.size
@@ -105,13 +116,20 @@ class CodeVectorStore:
                     )
                 )
         else:
-            self.qdrant.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=self.vector_size,
-                    distance=models.Distance.COSINE
+            try:
+                self.qdrant.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=self.vector_size,
+                        distance=models.Distance.COSINE
+                    )
                 )
-            )
+            except Exception as e:
+                # If it already exists (409 Conflict), just ignore
+                if "already exists" in str(e).lower():
+                    pass
+                else:
+                    raise e
 
     def _generate_id(self, file_path: str, chunk_index: int) -> str:
         """

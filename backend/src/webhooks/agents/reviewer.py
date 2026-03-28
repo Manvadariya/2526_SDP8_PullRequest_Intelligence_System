@@ -1,5 +1,6 @@
 from core.llm import LLMService
 from core.diff_parser import DiffParser
+from typing import Dict, Any, List, Optional
 import os
 from core.context_builder import ContextBuilder
 from agents.planner import ReviewPlanner
@@ -74,14 +75,27 @@ DEPENDENCY        Supply chain risk, version pinning, unused imports
 """
 
 class ReviewerAgent:
-    def __init__(self):
-        self.llm = LLMService()
+    def __init__(self, llm_service=None):
+        self.llm = llm_service or LLMService()
         self.diff_parser = DiffParser()
         self.context_builder = ContextBuilder()
         self.planner = ReviewPlanner()
         self.github = GitHubClient()
         self.scanner = SecretScanner()
         self.feedback = FeedbackManager()
+
+    def review(self, diff: str, title: str, description: str = "", context: str = "", repo: str = None, pr_number: int = None) -> Dict[str, Any]:
+        """
+        Main entry point for review, wrapping run_inline_review for compatibility with ReviewWorker.
+        """
+        return self.run_inline_review(
+            raw_diff=diff,
+            pr_title=title,
+            custom_instructions=description,
+            repo_path=None, # In worker we don't have local path unless cloned
+            pr_number=pr_number,
+            repo_name=repo
+        )
 
     def _fix_malformed_json(self, text: str) -> str:
         """
@@ -768,6 +782,12 @@ Return ONLY valid JSON. No markdown. No commentary outside the JSON."""
                 nitpick_count = 0
                 
                 for finding in findings:
+                    # Handle case where LLM returns a string instead of dict
+                    if isinstance(finding, str):
+                        finding = {"message": finding, "type": "actionable"}
+                    if not isinstance(finding, dict):
+                        continue
+                    
                     message = finding.get("message", finding.get("finding", "Issue detected"))
                     suggestion = finding.get("suggestion", finding.get("fix", ""))
                     finding_type = finding.get("type", "actionable")

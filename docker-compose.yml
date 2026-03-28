@@ -1,37 +1,117 @@
 services:
+  # ─── Vector Database ──────────────────────
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: qdrant
+    container_name: agenticpr-qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      - qdrant_storage:/qdrant/storage
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
+  # ─── Message Queue ────────────────────────
   redis:
-    image: redis:alpine
-    container_name: redis
+    image: redis:7-alpine
+    container_name: agenticpr-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     restart: unless-stopped
-    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Database ─────────────────────────────
   postgres:
-    image: postgres:15-alpine
-    container_name: postgres
+    image: postgres:16-alpine
+    container_name: agenticpr-postgres
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: prbot
+      POSTGRES_PASSWORD: prbot
       POSTGRES_DB: pr_bot_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prbot -d pr_bot_db"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Backend API ──────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agenticpr-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://prbot:prbot@postgres:5432/pr_bot_db
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./backend/src/webhooks:/app
+    restart: unless-stopped
+
+  # ─── Workers ──────────────────────────────
+  workers:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agenticpr-workers
+    command: python run_workers.py
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://prbot:prbot@postgres:5432/pr_bot_db
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/src/webhooks:/app
+      - worker_workspaces:/app/workspaces
+    restart: unless-stopped
+
+  # ─── Frontend ─────────────────────────────
+  frontend:
+    build:
+      context: ./AgenticPR
+      dockerfile: Dockerfile
+    container_name: agenticpr-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   redis_data:
   qdrant_storage:
   postgres_data:
+  worker_workspaces:

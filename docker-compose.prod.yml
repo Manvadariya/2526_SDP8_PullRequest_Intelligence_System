@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: sapient
+      POSTGRES_PASSWORD: sapient_password
+      POSTGRES_DB: agenticpr
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sapient -d agenticpr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: always
+    ports:
+      - "6333:6333"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  api:
+    build: 
+      context: ./backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      - DB_HOST=postgres
+      - DATABASE_URL=postgresql+asyncpg://sapient:sapient_password@postgres:5432/agenticpr
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      # ... other production secrets provided via .env
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  fleet-worker:
+    build: 
+      context: ./backend
+    restart: always
+    # Wait for infrastructure to be healthy before starting workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python run_workers.py
+    # Must mount Docker socket so worker can spin up job-specific containers
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./tmp_workspace:/workspace  # Host mount for source code analysis
+    environment:
+      - DB_HOST=postgres
+      - DATABASE_URL=postgresql+asyncpg://sapient:sapient_password@postgres:5432/agenticpr
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - WORKSPACE_MOUNT_PATH=/workspace
+    deploy:
+      # Horizontal scaling
+      # Scaled down for local stability
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  frontend:
+    build:
+      context: ./AgenticPR
+    restart: always
+    ports:
+      - "8080:5173"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M

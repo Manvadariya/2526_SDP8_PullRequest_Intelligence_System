@@ -1,110 +1,144 @@
-
-import asyncio
-import sys
 import os
-from unittest.mock import MagicMock, AsyncMock, patch
+import sys
 import unittest
+import asyncio
+from unittest.mock import AsyncMock, patch, MagicMock
 
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "core"))
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src", "webhooks"))
+sys.path.append(os.path.join(os.path.dirname(__file__)))
 
+from workers.fetch import FetchWorker
+from workers.analyze import AnalyzeWorker
+from workers.review import ReviewWorker
+from workers.publish import PublishWorker
 from core.types import PRMetadata
-from core.orchestrator import Orchestrator
+from models import JobStatus
 
-class TestEndToEnd(unittest.IsolatedAsyncioTestCase):
+class TestAsyncWorkerFlow(unittest.IsolatedAsyncioTestCase):
+    """
+    End-to-End Test Suite for the distributed async Redis worker pipeline.
+    Mocks GitHub API, Docker Runner, and LLM to prevent external execution.
+    """
     
-    @patch("core.orchestrator.GitHubClient")
-    @patch("core.orchestrator.RepoManager")
-    @patch("core.orchestrator.DockerRunner")
-    @patch("core.orchestrator.IndexManager")
-    @patch("core.orchestrator.AsyncSession") # Mock DB session context manager
-    @patch("core.orchestrator.engine")
-    async def test_full_flow(self, mock_engine, mock_session_cls, mock_indexer_cls, mock_docker_cls, mock_repo_cls, mock_gh_cls):
-        print("\n  [INFO] Starting End-to-End Flow Test...")
+    @patch("core.github_client.GitHubClient")
+    @patch("core.docker_runner.DockerRunner")
+    @patch("core.indexing.manager.IndexManager")
+    @patch("agents.reviewer.ReviewerAgent")
+    async def test_full_pipeline_flow(self, mock_reviewer_agent, mock_indexer, mock_docker_runner, mock_github_client):
+        print("\n[INFO] Starting Async Distributed Pipeline E2E Test...")
         
-        # 1. Setup Mocks
-        mock_gh = mock_gh_cls.return_value
-        mock_gh.get_pr_diff = AsyncMock(return_value="diff --git a/test.py b/test.py\nindex 123..456 100644\n--- a/test.py\n+++ b/test.py\n@@ -1 +1 @@\n-old\n+new")
-        mock_gh.set_commit_status = AsyncMock()
-        mock_gh.post_inline_review = AsyncMock()
-        mock_gh.post_or_update_comment = AsyncMock()
-        mock_gh.add_label = AsyncMock()  # FIXED: Was missing
+        # --- 1. MOCK SETUP ---
+        # Mock GitHub
+        gh_instance = mock_github_client.return_value
+        gh_instance.get_pr_diff = AsyncMock(return_value="diff --git a/main.py b/main.py\n+print('hello')\n")
+        gh_instance.set_commit_status = AsyncMock()
+        gh_instance.post_inline_review = AsyncMock()
+        gh_instance.add_label = AsyncMock()
 
-        # Mocking config loader
-        with patch("core.custom_checks.CustomCheckLoader.load_from_repo", new_callable=AsyncMock) as mock_config:
-            mock_config.return_value = {"custom_instructions": "Review carefully."}
-            
-            mock_repo = mock_repo_cls.return_value
-            mock_repo.clone_and_checkout.return_value = "/tmp/mock_repo"
-            
-            mock_docker = mock_docker_cls.return_value
-            mock_docker.run_checks_in_container = AsyncMock(return_value={"lint": {}, "security": {}}) # Fixed: static method mock structure might be tricky, but wrapper calls it.
-            # Actually Orchestrator calls DockerRunner.run_checks_in_container (static). 
-            # We mocked the class, so we need to mock the static method on the class itself, not instance.
-            mock_docker_cls.run_checks_in_container = AsyncMock(return_value={"lint": {}, "security": {}})
-            
-            mock_indexer = mock_indexer_cls.return_value
-            mock_indexer.process_diff = MagicMock() # Sync method
+        # Mock Docker Runner
+        mock_docker_runner.run_checks_in_container = AsyncMock(return_value={
+            "lint": {"summary": "Mock Lint Pass", "details": []},
+            "security": {"summary": "Mock Security Pass", "details": []}
+        })
 
-            # Mock DB
-            mock_session = mock_session_cls.return_value
-            mock_session.__aenter__.return_value = mock_session
-            mock_session.get = AsyncMock(return_value=MagicMock(id=1)) # Mock Job
-            mock_session.add = MagicMock()
-            mock_session.commit = AsyncMock()
-            mock_session.rollback = AsyncMock() # FIXED: Was missing
+        # Mock Index Manager
+        indexer_instance = mock_indexer.return_value
+        indexer_instance.process_diff = MagicMock()
 
-            # Mock Reviewer Agent (to avoid Real LLM calls)
-            with patch("core.orchestrator.ReviewerAgent") as mock_agent_cls:
-                mock_agent = mock_agent_cls.return_value
-                mock_agent.run_inline_review.return_value = {
-                    "summary": "Mock Review Summary",
-                    "inline_comments": [],
-                    "verdict": "APPROVE",
-                    "clean_files": ["test.py"]
-                }
-                
-                # 2. Initialize Orchestrator
-                orch = Orchestrator()
-                # Inject mocked instances if __init__ created real ones (it did)
-                orch.gh = mock_gh
-                orch.indexer = mock_indexer
-                orch.reviewer = mock_agent
-                
-                # 3. Create Metadata
-                metadata = PRMetadata(
-                    repo_full_name="owner/repo",
-                    pr_number=123,
-                    commit_sha="sha123",
-                    title="Test PR",
-                    description="Testing E2E",
-                    branch_name="feature-branch"
-                )
-                
-                # 4. Run Process
-                await orch.process_pr(metadata, job_id=1)
-                
-                # 5. Verify Steps
-                print("  [PASS] Orchestrator started.")
-                mock_gh.set_commit_status.assert_called()
-                print("  [PASS] Commit status set (Pending).")
-                
-                mock_repo.clone_and_checkout.assert_called()
-                print("  [PASS] Repo cloned.")
-                
-                mock_indexer.process_diff.assert_called()
-                print("  [PASS] IndexManager called for incremental update.")
-                
-                mock_agent.run_inline_review.assert_called()
-                print("  [PASS] ReviewerAgent called.")
-                
-                mock_gh.add_label.assert_called_with("owner/repo", 123, "ReviewedByApex")
-                print("  [PASS] PR Label added.")
-                
-                # Check Database Interaction
-                mock_session.commit.assert_called()
-                print("  [PASS] Database constraints saved (Job status updated).")
+        # Mock LLM Reviewer Agent
+        agent_instance = mock_reviewer_agent.return_value
+        agent_instance.review = MagicMock(return_value={
+            "inline_comments": [
+                {"path": "main.py", "line": 2, "body": "Mock inline comment"}
+            ],
+            "summary": "Mock Review Summary",
+        })
+
+        # Mock Queue Manager & DB Session Factory
+        mock_queue = AsyncMock()
+        mock_db_session_factory = MagicMock()
+        
+        # Database context manager mock
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        
+        # Mocking the `Job` SQLAlchemy model lookup
+        mock_job = MagicMock()
+        mock_job.id = 999
+        mock_job.status = JobStatus.QUEUED
+
+        mock_session.execute = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.execute.return_value.scalars.return_value.first.return_value = mock_job
+        mock_db_session_factory.return_value = mock_session
+
+        # Initial Payload simulating Webhook Reception
+        initial_data = {
+            "job_id": 999,
+            "repo_full_name": "test/repo",
+            "pr_number": 42,
+            "commit_sha": "abcdef123456",
+            "title": "Mock PR",
+            "description": "Mock PR Description",
+            "retry_count": 0
+        }
+
+        # --- 2. EXECUTE FETCHER ---
+        print("[INFO] Simulating Fetch Worker...")
+        fetch_worker = FetchWorker(mock_queue, mock_db_session_factory)
+        
+        # Mock clone dir
+        with patch("core.repo_manager.RepoManager.clone_and_checkout", return_value="/tmp/mock_repo"):
+            fetch_result = await fetch_worker.process(initial_data)
+        
+        self.assertIsNotNone(fetch_result, "FetchWorker should return context data")
+        self.assertIn("diff_text", fetch_result)
+        self.assertEqual(fetch_result["changed_files"], ["main.py"])
+        # Pipeline forwards aggregate data to next stage
+        analyze_data = {**initial_data, **fetch_result}
+
+        # --- 3. EXECUTE ANALYZER ---
+        print("[INFO] Simulating Analyze Worker...")
+        analyze_worker = AnalyzeWorker(mock_queue, mock_db_session_factory)
+        analyze_result = await analyze_worker.process(analyze_data)
+        
+        self.assertIsNotNone(analyze_result)
+        self.assertIn("static_findings", analyze_result)
+        self.assertIn("context_pack", analyze_result)
+        review_data = {**analyze_data, **analyze_result}
+
+        # --- 4. EXECUTE REVIEWER ---
+        print("[INFO] Simulating Review Worker (LLM)...")
+        review_worker = ReviewWorker(mock_queue, mock_db_session_factory)
+        
+        # Mock Token Bucket inside ReviewWorker to return True
+        with patch("core.rate_limiter.TokenBucketRateLimiter") as mock_tb:
+            mock_tb_instance = mock_tb.return_value
+            mock_tb_instance.acquire = AsyncMock(return_value=True)
+            
+            review_result = await review_worker.process(review_data)
+        
+        self.assertIsNotNone(review_result)
+        self.assertEqual(review_result["findings_count"], 1)
+        publish_data = {**review_data, **review_result}
+
+        # --- 5. EXECUTE PUBLISHER ---
+        print("[INFO] Simulating Publish Worker...")
+        publish_worker = PublishWorker(mock_queue, mock_db_session_factory)
+        publish_result = await publish_worker.process(publish_data)
+
+        # Publisher is terminal and returns None
+        self.assertIsNone(publish_result)
+        
+        # --- 6. ASSERTIONS ---
+        print("[INFO] Verifying Network Boundary Calls...")
+        
+        # Assert GitHub Client interacted properly
+        gh_instance.post_inline_review.assert_called_once()
+        gh_instance.add_label.assert_called_with("test/repo", 42, "pr-reviewed")
+
+        print("[OK] Async Pipeline passed flawlessly.")
 
 if __name__ == "__main__":
     unittest.main()

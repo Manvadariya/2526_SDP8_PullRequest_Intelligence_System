@@ -1,3 +1,7 @@
+import json
+import logging
+from datetime import datetime
+
 from sqlmodel import select
 from core.github_client import GitHubClient
 from core.custom_checks import CustomCheckLoader
@@ -5,15 +9,17 @@ from core.repo_manager import RepoManager
 from core.project_context import ProjectContextBuilder
 from core.types import PRMetadata
 from core.diff_parser import DiffParser
+from core.summary_builder import build_report_card_block
 from core.docker_runner import DockerRunner
 from agents.reviewer import ReviewerAgent
 from agents.fix_prompt_agent import FixPromptAgent
-from models import Job, AgentResult
+from models import Job, AgentResult, JobStatus
 from database import engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from config import config as app_config
-import json
 from core.indexing.manager import IndexManager
+
+logger = logging.getLogger("agenticpr.orchestrator")
 
 class Orchestrator:
     def __init__(self):
@@ -24,14 +30,20 @@ class Orchestrator:
         self.indexer = IndexManager()
 
     async def process_pr(self, metadata: PRMetadata, job_id: int):
-        print(f" Job {job_id}: Processing PR #{metadata.pr_number}")
+        """Process a PR review (in-process fallback when Redis is unavailable)."""
+        logger.info(f"Job {job_id}: Processing PR #{metadata.pr_number} ({metadata.repo_full_name})")
         
         async with AsyncSession(engine, expire_on_commit=False) as session:
             try:
                 # 1. DB Update
                 job = await session.get(Job, job_id)
                 if job:
-                    job.status = "processing"
+                    # Check if superseded before starting
+                    if job.status in (JobStatus.SUPERSEDED, JobStatus.CANCELED):
+                        logger.info(f"Job {job_id}: Skipping — status is {job.status}")
+                        return
+                    job.status = JobStatus.PROCESSING
+                    job.started_at = datetime.utcnow()
                     session.add(job)
                     await session.commit()
 
@@ -63,13 +75,13 @@ class Orchestrator:
                         try:
                             docker_results = await DockerRunner.run_checks_in_container(repo_path, changed_files)
                         except Exception as e:
-                            print(f" Docker checks failed (continuing with LLM review): {e}")
+                            logger.warning(f"Docker checks failed (continuing with LLM review): {e}")
                             docker_results = {
                                 "lint": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)},
                                 "security": {"summary": "Skipped due to Docker error", "details": [], "error": str(e)}
                             }
                     else:
-                         print(" Docker checks disabled in config. Skipping.")
+                         logger.info("Docker checks disabled in config. Skipping.")
                          docker_results = {
                              "lint": {"summary": "Disabled by config", "details": []},
                              "security": {"summary": "Disabled by config", "details": []}
@@ -79,11 +91,11 @@ class Orchestrator:
                     sec_results = docker_results["security"]
                     
                     # 6. Update Vector Index (Incremental)
-                    print(f"  [Orchestrator] Updating index for {len(changed_files)} changed files...")
+                    logger.info(f"Updating index for {len(changed_files)} changed files...")
                     try:
                         self.indexer.process_diff(changed_files, repo_path)
                     except Exception as e:
-                        print(f" Index update failed (continuing): {e}")
+                        logger.warning(f"Index update failed (continuing): {e}")
 
                     # 7. Combine Reports for Context
                     project_context = await ProjectContextBuilder.build(
@@ -170,6 +182,23 @@ class Orchestrator:
                     verdict = review_result.get("verdict", "COMMENT")
                     file_summaries = review_result.get("file_summaries", {})
                     stats = review_result.get("stats", {})
+                    nitpicks = review_result.get("nitpicks", {})
+                    all_raw_findings = review_result.get("all_raw_findings", {})
+                    
+                    # ── BLOCK 0: DeepSource-style PR Report Card ──
+                    report_card = build_report_card_block(
+                        repo_full_name=metadata.repo_full_name,
+                        pr_number=metadata.pr_number,
+                        commit_sha=metadata.commit_sha,
+                        inline_comments=inline_comments,
+                        nitpicks=nitpicks,
+                        clean_files=clean_files,
+                        all_files=list(file_diffs.keys()),
+                        all_raw_findings=all_raw_findings,
+                        lint_results=lint_results,
+                        sec_results=sec_results,
+                        verdict=verdict,
+                    )
                     
                     # ── DROPDOWN 1:  Walkthrough ──
                     walkthrough_parts = []
@@ -178,7 +207,8 @@ class Orchestrator:
                             walkthrough_parts.append(cs.strip())
                     walkthrough = " ".join(walkthrough_parts) if walkthrough_parts else review_result.get("summary", "Review complete.")
                     
-                    summary = "<details>\n"
+                    summary = report_card
+                    summary += "<details>\n"
                     summary += "<summary> Walkthrough</summary>\n\n"
                     summary += f"## Walkthrough\n\n{walkthrough}\n\n"
                     summary += "## Changes\n\n"
@@ -328,7 +358,7 @@ class Orchestrator:
                                 all_raw_findings, pr_title=metadata.title
                             )
                         except Exception as e:
-                            print(f"  [FixBot]  Fix prompt generation failed: {e}")
+                            logger.warning(f"Fix prompt generation failed: {e}")
                             fix_prompt = "Fix prompt generation failed. Please refer to inline comments."
                         
                         review_body += "<details>\n"
@@ -497,7 +527,8 @@ class Orchestrator:
                     await self.gh.set_commit_status(metadata.repo_full_name, metadata.commit_sha, status_state, status_desc)
                     
                     # 14. Save Results
-                    job.status = status_state
+                    job.status = JobStatus.COMPLETED
+                    job.finished_at = datetime.utcnow()
                     result = AgentResult(
                         job_id=job.id, 
                         agent_name="reviewer", 
@@ -519,23 +550,23 @@ class Orchestrator:
                     session.add(job)
                     await session.commit()
                     
-                    print(f" Job {job_id}: {status_state.upper()} - {len(file_diffs)} files, {len(inline_comments)} inline comments, {len(clean_files)} clean")
+                    logger.info(f"Job {job_id}: COMPLETED - {len(file_diffs)} files, {len(inline_comments)} inline comments, {len(clean_files)} clean")
 
                 finally:
                     manager.cleanup()
 
             except Exception as e:
-                print(f" Job {job_id}: Failed - {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Job {job_id}: Failed - {e}", exc_info=True)
                 
                 try:
                     job = await session.get(Job, job_id)
                     if job:
-                        job.status = "failed"
+                        job.status = JobStatus.FAILED
+                        job.error_detail = str(e)[:500]
+                        job.finished_at = datetime.utcnow()
                         session.add(job)
                         await session.commit()
-                except:
+                except Exception:
                     pass
                 
                 await session.rollback()

@@ -10,7 +10,7 @@ Adds REST endpoints for:
 All endpoints are prefixed with /api/.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,9 +19,13 @@ from sqlmodel import select
 from database import get_session
 from models import Job, AgentResult, User, ActivatedRepo
 from auth import get_current_user
+from core.security import verify_github_signature
+from core.logger import get_logger, set_log_context, clear_log_context
 from config import config as app_config
 import json
 import httpx
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api", tags=["API"])
 
@@ -128,6 +132,7 @@ class ManualReviewRequest(BaseModel):
 
 @router.post("/review")
 async def trigger_manual_review(
+    request: Request,
     req: ManualReviewRequest,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
@@ -139,9 +144,14 @@ async def trigger_manual_review(
     """
     from core.orchestrator import Orchestrator
     from core.types import PRMetadata
+    from models import JobStatus
 
     # If no commit_sha, try to fetch it from GitHub
     commit_sha = req.commit_sha
+    title = f"PR #{req.pr_number}"
+    description = ""
+    branch = "unknown"
+
     if not commit_sha:
         from core.github_client import GitHubClient
         import httpx
@@ -153,40 +163,90 @@ async def trigger_manual_review(
                 resp.raise_for_status()
                 pr_data = resp.json()
                 commit_sha = pr_data["head"]["sha"]
-                title = pr_data.get("title", "")
+                title = pr_data.get("title", title)
                 description = pr_data.get("body", "") or ""
                 branch = pr_data["head"]["ref"]
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to fetch PR info: {e}")
+
+    # --- Deduplicate: only skip if an ACTIVE job already exists for this commit ---
+    from sqlmodel import select as sql_select
+
+    ACTIVE_STATUSES = [
+        JobStatus.QUEUED, JobStatus.PROCESSING,
+        JobStatus.FETCHING, JobStatus.ANALYZING, JobStatus.REVIEWING
+    ]
+
+    existing = await session.execute(
+        sql_select(Job).where(
+            Job.repo_full_name == req.repo,
+            Job.pr_number == req.pr_number,
+            Job.commit_sha == commit_sha,
+        )
+    )
+    existing_job = existing.scalars().first()
+
+    if existing_job:
+        if existing_job.status in ACTIVE_STATUSES:
+            # Already actively processing — return the existing job
+            return {
+                "status": "already_in_progress",
+                "job_id": existing_job.id,
+                "msg": "Review already in progress for this commit",
+            }
+        # Job completed or failed — reset and re-trigger it
+        existing_job.status = JobStatus.QUEUED
+        existing_job.error_detail = None
+        existing_job.finished_at = None
+        existing_job.started_at = None
+        existing_job.retry_count = 0
+        existing_job.user_id = current_user.id
+        session.add(existing_job)
+        await session.commit()
+        await session.refresh(existing_job)
+        new_job = existing_job
     else:
-        title = f"PR #{req.pr_number}"
-        description = ""
-        branch = "unknown"
+        # --- Supersede: cancel older queued/processing jobs for this PR ---
+        older_result = await session.execute(
+            sql_select(Job).where(
+                Job.repo_full_name == req.repo,
+                Job.pr_number == req.pr_number,
+                Job.status.in_(ACTIVE_STATUSES)
+            )
+        )
+        for old_job in older_result.scalars().all():
+            old_job.status = JobStatus.SUPERSEDED
+            session.add(old_job)
 
-    metadata = PRMetadata(
-        repo_full_name=req.repo,
-        pr_number=req.pr_number,
-        commit_sha=commit_sha,
-        title=title,
-        description=description,
-        branch_name=branch,
-    )
+        # Create new job
+        new_job = Job(
+            repo_full_name=req.repo,
+            pr_number=req.pr_number,
+            commit_sha=commit_sha,
+            status=JobStatus.QUEUED,
+            user_id=current_user.id,
+        )
+        session.add(new_job)
+        await session.commit()
+        await session.refresh(new_job)
 
-    # Create job
-    new_job = Job(
-        repo_full_name=req.repo,
-        pr_number=req.pr_number,
-        commit_sha=commit_sha,
-        status="queued",
-        user_id=current_user.id,
-    )
-    session.add(new_job)
-    await session.commit()
-    await session.refresh(new_job)
 
-    # Run in background
-    orchestrator = Orchestrator()
-    background_tasks.add_task(orchestrator.process_pr, metadata, new_job.id)
+    # --- Enqueue to durable queue (with BackgroundTasks fallback) ---
+    try:
+        queue = request.app.state.queue
+        await queue.enqueue("review:fetch", {
+            "job_id": new_job.id,
+            "repo_full_name": req.repo,
+            "pr_number": req.pr_number,
+            "commit_sha": commit_sha,
+            "title": title,
+            "description": description,
+            "branch_name": branch,
+        })
+    except Exception:
+        # Fallback: run in-process
+        orchestrator = Orchestrator()
+        background_tasks.add_task(orchestrator.process_pr, metadata, new_job.id)
 
     return {
         "status": "Review queued",
@@ -197,7 +257,153 @@ async def trigger_manual_review(
 
 
 # ═══════════════════════════════════════════
-# 4. MCP CHAT ENDPOINT
+# 4. GITHUB WEBHOOK ENDPOINT
+# ═══════════════════════════════════════════
+
+@router.post("/webhook")
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Receives GitHub webhook events.
+    Validates the signature, extracts PR metadata, creates/updates a job,
+    and enqueues it for processing.
+    """
+    from core.orchestrator import Orchestrator
+    from core.types import PRMetadata
+    from models import JobStatus
+    from database import engine
+
+    # 1. Validate Signature
+    try:
+        webhook_secret = app_config.GITHUB_WEBHOOK_SECRET
+        if not webhook_secret:
+            logger.error("GITHUB_WEBHOOK_SECRET is not set. Cannot validate webhook signature.")
+            raise HTTPException(status_code=500, detail="Webhook secret not configured.")
+
+        body = await request.body()
+        signature = request.headers.get("X-Hub-Signature-256")
+        if not signature:
+            raise HTTPException(status_code=401, detail="X-Hub-Signature-256 header missing")
+
+        await verify_github_signature(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Webhook signature verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    payload = json.loads(body)
+    event = request.headers.get("X-GitHub-Event")
+
+    # 2. Extract Event Metadata
+    try:
+        if event == "pull_request":
+            action = payload.get("action")
+            if action not in ["opened", "synchronize", "reopened"]:
+                logger.info(f"Ignoring pull_request action: {action}")
+                return {"status": "ignored", "reason": f"unhandled action: {action}"}
+            
+            pr_data = payload.get("pull_request", {})
+            repo_data = payload.get("repository", {})
+            
+            metadata = PRMetadata(
+                repo_full_name=repo_data.get("full_name"),
+                pr_number=pr_data.get("number"),
+                commit_sha=pr_data.get("head", {}).get("sha"),
+                title=pr_data.get("title", ""),
+                description=pr_data.get("body", ""),
+                branch_name=pr_data.get("head", {}).get("ref")
+            )
+        else:
+            logger.info(f"Ignoring GitHub event: {event}")
+            return {"status": "ignored", "reason": f"unhandled event: {event}"}
+    except Exception as e:
+        logger.error(f"Failed to parse webhook payload: {e}")
+        raise HTTPException(status_code=400, detail="Invalid payload structure")
+    
+    # --- Context Injection ---
+    set_log_context(repo=metadata.repo_full_name, pr=metadata.pr_number)
+    logger.info(f"Received webhook for {metadata.repo_full_name}#{metadata.pr_number} (sha: {metadata.commit_sha})")
+    
+    # 3. Create or Update DB Job
+    try:
+        async with AsyncSession(engine) as session:
+            # Check for existing job
+            stmt = select(Job).where(
+                Job.repo_full_name == metadata.repo_full_name,
+                Job.pr_number == metadata.pr_number,
+                Job.commit_sha == metadata.commit_sha
+            )
+            result = await session.execute(stmt)
+            existing_job = result.scalars().first()
+            
+            if existing_job:
+                # Deduplication: If this exact commit is already enqueued or processing
+                if existing_job.status in [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.FETCHING, JobStatus.ANALYZING]:
+                    logger.info(f"Job {existing_job.id} already active. Deduplicating.")
+                    clear_log_context()
+                    return {"status": "ignored", "reason": "Already tracking this commit."}
+                
+                # If it's done or failed, we can re-run it
+                job = existing_job
+                job.status = JobStatus.QUEUED
+                job.current_stage = "fetch"
+            else:
+                # 3b. Cancel previous jobs for this PR (Supersede)
+                cancel_stmt = select(Job).where(
+                    Job.repo_full_name == metadata.repo_full_name,
+                    Job.pr_number == metadata.pr_number,
+                    Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.FETCHING, JobStatus.ANALYZING])
+                )
+                cancel_res = await session.execute(cancel_stmt)
+                stale_jobs = cancel_res.scalars().all()
+                for sj in stale_jobs:
+                    logger.warning(f"Superseding stale job {sj.id} with new commit {metadata.commit_sha}")
+                    sj.status = JobStatus.SUPERSEDED
+            
+                # 3c. Create new job
+                job = Job(
+                    repo_full_name=metadata.repo_full_name,
+                    pr_number=metadata.pr_number,
+                    commit_sha=metadata.commit_sha,
+                    status=JobStatus.QUEUED,
+                    current_stage="fetch"
+                )
+                session.add(job)
+            
+            await session.commit()
+            await session.refresh(job)
+            job_id = job.id
+            set_log_context(job_id=job_id)
+            logger.info("Database job created successfully.")
+    except Exception as e:
+        logger.error(f"Failed to create/update job in DB: {e}")
+        clear_log_context()
+        raise HTTPException(status_code=500, detail="Database error during job creation")
+
+    # 4. Enqueue to durable queue (with BackgroundTasks fallback)
+    try:
+        queue = request.app.state.queue
+        await queue.enqueue("review:fetch", {
+            "job_id": job_id,
+            "repo_full_name": metadata.repo_full_name,
+            "pr_number": metadata.pr_number,
+            "commit_sha": metadata.commit_sha,
+            "title": metadata.title,
+            "description": metadata.description,
+            "branch_name": metadata.branch_name,
+        })
+        logger.info("Successfully enqueued durable worker task")
+        clear_log_context()
+        
+        return {"status": "accepted", "job_id": job_id, "message": "Enqueued to Redis streams"}
+    except Exception as e:
+        logger.error(f"Failed during DB/Queue operations: {e}")
+        clear_log_context()
+        raise HTTPException(status_code=500, detail="Internal processing error")
+
+
+# ═══════════════════════════════════════════
+# 5. MCP CHAT ENDPOINT
 # ═══════════════════════════════════════════
 
 class ChatRequest(BaseModel):
@@ -246,7 +452,7 @@ async def mcp_chat(req: ChatRequest):
 
 
 # ═══════════════════════════════════════════
-# 5. OLLAMA STATUS ENDPOINT
+# 6. OLLAMA STATUS ENDPOINT
 # ═══════════════════════════════════════════
 
 @router.get("/ollama/status")
@@ -287,7 +493,7 @@ async def ollama_status():
 
 
 # ═══════════════════════════════════════════
-# 6. REPO REVIEW STATS (aggregated from jobs)
+# 7. REPO REVIEW STATS (aggregated from jobs)
 # ═══════════════════════════════════════════
 
 @router.get("/repos/{owner}/{repo}/stats")

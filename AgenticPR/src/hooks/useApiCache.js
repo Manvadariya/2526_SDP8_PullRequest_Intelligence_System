@@ -51,7 +51,7 @@ export function useActivatedRepos() {
 }
 
 
-// ─── 3. Jobs list (auto-polls every 3s when active jobs exist) ───────
+// ─── 3. Jobs list (polls every 5s when active jobs exist — SSE is primary) ──
 export function useJobs() {
   const { authFetch } = useAuth();
   return useQuery({
@@ -61,8 +61,9 @@ export function useJobs() {
     refetchInterval: (query) => {
       const jobs = query.state.data;
       if (!Array.isArray(jobs)) return false;
-      const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'processing');
-      return hasActive ? 3000 : false;
+      const ACTIVE_STATUSES = ['queued', 'processing', 'fetching', 'analyzing', 'reviewing', 'publishing'];
+      const hasActive = jobs.some(j => ACTIVE_STATUSES.includes(j.status));
+      return hasActive ? 5000 : false;  // 5s polling as SSE backup
     },
   });
 }
@@ -80,7 +81,8 @@ export function useJobDetail(jobId) {
     refetchInterval: (query) => {
       const job = query.state.data;
       if (!job) return false;
-      return (job.status === 'queued' || job.status === 'processing') ? 3000 : false;
+      const ACTIVE_STATUSES = ['queued', 'processing', 'fetching', 'analyzing', 'reviewing', 'publishing'];
+      return ACTIVE_STATUSES.includes(job.status) ? 5000 : false;
     },
   });
 }
@@ -90,10 +92,11 @@ export function useJobDetail(jobId) {
 export function useActiveJobForPR(repoFullName, prNumber) {
   const { data: jobs = [] } = useJobs();
   if (!repoFullName || !prNumber) return null;
+  const ACTIVE_STATUSES = ['queued', 'processing', 'fetching', 'analyzing', 'reviewing', 'publishing'];
   return jobs.find(
     j => j.repo_full_name === repoFullName &&
       j.pr_number === prNumber &&
-      (j.status === 'queued' || j.status === 'processing')
+      ACTIVE_STATUSES.includes(j.status)
   ) || jobs.find(
     j => j.repo_full_name === repoFullName &&
       j.pr_number === prNumber

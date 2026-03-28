@@ -1,11 +1,28 @@
 import hashlib
 import hmac
+import os
+import logging
 from fastapi import Request, HTTPException, status
 from config import config
 
+logger = logging.getLogger("agenticpr.security")
+
+# ─── Production mode detection ──────────────────────────────────
+PRODUCTION = os.getenv("PRODUCTION", "").lower() in ("true", "1", "yes")
+
+
 async def verify_github_signature(request: Request):
-    # Skip verification if no secret is set (for testing)
+    """Verify GitHub webhook signature. 
+    In production: MANDATORY — rejects all unsigned requests.
+    In development: Optional (warns if missing).
+    """
     if not config.WEBHOOK_SECRET:
+        if PRODUCTION:
+            raise HTTPException(
+                status_code=500, 
+                detail="WEBHOOK_SECRET is required in production. Set it in environment."
+            )
+        logger.warning("⚠ WEBHOOK_SECRET not set — skipping signature verification (dev mode only)")
         return
 
     signature_header = request.headers.get("X-Hub-Signature-256")
@@ -26,12 +43,14 @@ async def verify_github_signature(request: Request):
     if not hmac.compare_digest(expected_signature, signature_header):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
+
+# ─── Secret Scanner (pre-LLM firewall) ─────────────────────────
 import re
 
 class SecretScanner:
     """
     Scans text for sensitive information (API keys, passwords) and redacts them.
-    Acting as a firewall involved before sending data to LLM.
+    Acting as a firewall invoked before sending data to LLM.
     """
     def __init__(self):
         self.patterns = [
@@ -42,13 +61,16 @@ class SecretScanner:
             # Private Key Header
             (r"-----BEGIN PRIVATE KEY-----", "[REDACTED_PRIVATE_KEY]"),
             # Password in URL (postgres://user:password@host) - simplified regex
-            (r":([^:@\s]+)@([a-zA-Z0-9.-]+)", ":[REDACTED_PASSWORD]@\\2")
+            (r":([^:@\s]+)@([a-zA-Z0-9.-]+)", ":[REDACTED_PASSWORD]@\\2"),
+            # GitHub tokens
+            (r"(ghp_[a-zA-Z0-9]{36,})", "[REDACTED_GITHUB_TOKEN]"),
+            (r"(gho_[a-zA-Z0-9]{36,})", "[REDACTED_GITHUB_TOKEN]"),
+            # Generic bearer tokens
+            (r"(Bearer\s+[a-zA-Z0-9._-]{20,})", "[REDACTED_BEARER]"),
         ]
 
     def redact(self, text: str) -> str:
-        """
-        Redacts secrets from the input text.
-        """
+        """Redacts secrets from the input text."""
         if not text:
             return ""
             

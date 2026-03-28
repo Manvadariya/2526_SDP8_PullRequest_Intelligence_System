@@ -31,29 +31,28 @@ class DockerRunner:
     @staticmethod
     async def run_checks_in_container(repo_path: str, changed_files: list = None) -> dict:
         """
-        Run checks inside the persistent worker container via `docker exec`.
+        Run checks inside a unique, job-specific worker container.
         """
         repo_dirname = os.path.basename(repo_path)
-        # Path inside container (assuming workspace is mounted at /workspace)
+        # Use a unique container name per job to prevent SIGKILL collateral damage
+        container_name = f"{DockerRunner.WORKER_NAME}-{repo_dirname}"
         container_workdir = f"/workspace/{repo_dirname}"
         
-        # Results are written to the repo dir itself to avoid permission issues with a separate mount
         results_file_lint = os.path.join(repo_path, "lint.json")
         results_file_sec = os.path.join(repo_path, "security.json")
 
-        print(f"🐳 Running checks for {repo_dirname} in worker '{DockerRunner.WORKER_NAME}'...")
+        print(f"🐳 Running checks for {repo_dirname} in isolated container '{container_name}'...")
 
-        # 1. Ensure Worker is Running
-        if not await DockerRunner._ensure_worker_running():
+        # 1. Ensure Job-Specific Worker is Running
+        if not await DockerRunner._ensure_worker_running(container_name, repo_path):
              return DockerRunner._default_results("Docker worker unavailable")
 
         try:
             # 2. Exec Command
-            # We run the script inside the container's view of the repo
             cmd_args = [
                 "exec",
                 "-w", container_workdir,
-                DockerRunner.WORKER_NAME,
+                container_name,
                 "/usr/local/bin/run_checks.sh",
                 ".",
                 "."
@@ -72,12 +71,20 @@ class DockerRunner:
             except asyncio.TimeoutError:
                 print(f"⏰ Checks timed out after {DockerRunner.TIMEOUT}s")
                 try:
+                    # The exec process wrapper itself
                     process.kill()
-                    # We can't kill the exec easily without killing the container or finding the PID.
-                    # For now, just warn. The script inside might still be running.
                 except:
                     pass
-                return DockerRunner._default_results("Review timed out")
+                
+                # --- strict SIGKILL enforcement for enterprise isolation ---
+                print(f"⚠️  Forcefully destroying container '{container_name}' due to timeout (SIGKILL)...")
+                try:
+                    # Background task to clean up without blocking the return
+                    asyncio.create_task(DockerRunner._remove_container(container_name))
+                except Exception as e:
+                    print(f" Failed to SIGKILL container: {e}")
+                    
+                return DockerRunner._default_results("Review timed out (SIGKILL enforced)")
 
             if stdout:
                 print(stdout.decode(errors="replace")[:1000]) # Log first 1000 chars
@@ -89,9 +96,6 @@ class DockerRunner:
             print(f" Checks finished (exit code {process.returncode})")
 
             # 3. Read Results from Repo Dir (Host side)
-            # The script writes lint.json and security.json to the current directory (container_workdir)
-            # which maps to repo_path on host.
-            
             lint_results = DockerRunner._read_json(results_file_lint)
             sec_results = DockerRunner._read_json(results_file_sec)
 
@@ -103,6 +107,10 @@ class DockerRunner:
         except Exception as e:
             print(f" Docker execution error: {e}")
             return DockerRunner._default_results(str(e))
+        finally:
+            # 4. Aggressive Cleanup (Ephemeral Container)
+            print(f"🧹 Destroying ephemeral container '{container_name}'...")
+            await DockerRunner._remove_container(container_name)
 
     # ── Service Management ─────────────────────────────────────
 
@@ -146,28 +154,30 @@ class DockerRunner:
             return False
 
     @staticmethod
-    async def _ensure_worker_running() -> bool:
-        """Ensure the long-running worker container is up."""
+    async def _ensure_worker_running(container_name: str, repo_path: str) -> bool:
+        """Ensure a unique, ephemeral worker container is up for this job."""
         # Pre-flight: is Docker daemon even reachable?
         if not await DockerRunner.check_docker_available():
             return False
 
         # Check if running
-        is_running = await DockerRunner._is_container_running(DockerRunner.WORKER_NAME)
+        is_running = await DockerRunner._is_container_running(container_name)
         if is_running:
             return True
         
-        print(f"🔧 Worker '{DockerRunner.WORKER_NAME}' not running. Starting...")
+        print(f"🔧 Starting ephemeral worker '{container_name}'...")
         
-        # Remove if exists but stopped
-        await DockerRunner._remove_container(DockerRunner.WORKER_NAME)
+        # Remove if exists from a previous crash
+        await DockerRunner._remove_container(container_name)
         
-        # Start new
         # Mount host workspace to /workspace in container
-        workspace_mount = getattr(app_config, "WORKSPACE_MOUNT_PATH", "")
+        # Use the parent of repo_path to ensure the container can see the specific repo dir
+        workspace_mount = os.path.dirname(repo_path)
         if not workspace_mount:
-            print(" WORKSPACE_MOUNT_PATH not set in config.")
-            return False
+            workspace_mount = getattr(app_config, "WORKSPACE_MOUNT_PATH", "")
+            if not workspace_mount:
+                print(" WORKSPACE_MOUNT_PATH not set in config.")
+                return False
             
         # Ensure dir exists on host
         if not os.path.exists(workspace_mount):
@@ -184,8 +194,9 @@ class DockerRunner:
 
         cmd_args = [
             "run", "-d",
-            "--name", DockerRunner.WORKER_NAME,
-            "--restart", "unless-stopped",
+            "--name", container_name,
+            "--memory", "1g",
+            "--cpus", "1.0",
             "-v", f"{workspace_mount}:/workspace",
             DockerRunner.IMAGE_NAME,
             "sleep", "infinity"
@@ -206,7 +217,7 @@ class DockerRunner:
              print(f" Worker started: {stdout.decode().strip()[:12]}")
              # Wait for status=running
              for _ in range(10):
-                 if await DockerRunner._is_container_running(DockerRunner.WORKER_NAME):
+                 if await DockerRunner._is_container_running(container_name):
                      return True
                  await asyncio.sleep(1)
              print(" Worker stuck in starting state.")

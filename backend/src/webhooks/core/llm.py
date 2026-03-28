@@ -26,7 +26,7 @@ class LLMService:
         if config.GROQ_API_KEY:
             try:
                 from groq import Groq
-                self.groq_client = Groq(api_key=config.GROQ_API_KEY)
+                self.groq_client = Groq(api_key=config.GROQ_API_KEY, max_retries=0)
                 print(f"  [LLM] ✓ Groq ready (model: {self.groq_model})")
             except Exception as e:
                 print(f"  [LLM] ✗ Groq init failed: {e}")
@@ -113,7 +113,7 @@ class LLMService:
 
     # ─── GROQ ──────────────────────────────────────────────────
     def _chat_groq(self, messages: list, temperature: float, max_tokens: int, response_format: dict) -> str:
-        """Send chat to Groq API."""
+        """Send chat to Groq API. On 429 rate limit, immediately fails to let fallback chain try Gemini."""
         kwargs = {
             "model": self.groq_model,
             "messages": messages,
@@ -124,7 +124,7 @@ class LLMService:
         if response_format:
             kwargs["response_format"] = response_format
         
-        max_retries = 2
+        max_retries = 2  # Keep low — fall through to Gemini quickly on failure
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.groq_client.chat.completions.create(**kwargs)
@@ -132,16 +132,26 @@ class LLMService:
                 if not response.choices or not response.choices[0].message.content:
                     self._log_empty_response("Groq", self.groq_model, response, attempt, max_retries)
                     if attempt < max_retries:
-                        time.sleep(2 * attempt)
+                        backoff = 2 ** attempt
+                        print(f"  [LLM] ⚠ Retrying Groq after {backoff}s...")
+                        time.sleep(backoff)
                         continue
                     return ""
                 
                 return response.choices[0].message.content.strip()
                 
             except Exception as e:
+                error_str = str(e).lower()
+                # On 429 rate limit, immediately bail to let Gemini handle it
+                if "429" in str(e) or "rate" in error_str or "too many" in error_str:
+                    print(f"  [LLM] ⚡ Groq rate-limited (429) — switching to Gemini fallback")
+                    raise  # Let the fallback chain catch it
+                
                 print(f"  [LLM] ❌ Groq error (attempt {attempt}/{max_retries}): {e}")
                 if attempt < max_retries:
-                    time.sleep(2 * attempt)
+                    backoff = 2 ** attempt
+                    print(f"  [LLM] ⚠ Retrying Groq after {backoff}s...")
+                    time.sleep(backoff)
                 else:
                     raise  # Let the fallback chain catch it
 
