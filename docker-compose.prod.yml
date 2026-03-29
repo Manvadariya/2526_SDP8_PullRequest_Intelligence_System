@@ -50,6 +50,8 @@ services:
     build: 
       context: ./backend
     restart: always
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,6 +77,8 @@ services:
     build: 
       context: ./backend
     restart: always
+    env_file:
+      - .env
     # Wait for infrastructure to be healthy before starting workers
     depends_on:
       postgres:

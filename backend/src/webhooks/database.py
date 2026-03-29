@@ -1,6 +1,7 @@
 from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 import os
 import logging
@@ -39,13 +40,21 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 
 
 async def init_db():
-    """Initialize database tables with retry logic."""
+    """Initialize database tables with retry logic and startup race protection."""
     retries = 5
     for i in range(retries):
         try:
             async with engine.begin() as conn:
-                # This creates tables if they don't exist
-                await conn.run_sync(SQLModel.metadata.create_all)
+                # Multiple API workers may start at the same time.
+                # Serialize schema creation to avoid duplicate-object races.
+                if DATABASE_URL.startswith("postgresql"):
+                    await conn.execute(text("SELECT pg_advisory_lock(9223372036854001201)"))
+                    try:
+                        await conn.run_sync(SQLModel.metadata.create_all)
+                    finally:
+                        await conn.execute(text("SELECT pg_advisory_unlock(9223372036854001201)"))
+                else:
+                    await conn.run_sync(SQLModel.metadata.create_all)
             logger.info(f"Database connected and initialized ({DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'local'})")
             return
         except Exception as e:

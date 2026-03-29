@@ -31,3 +31,4 @@ tmp/
 image.png
 image1.png
 imagec.png
+deploy-to-dockerhub.ps1
