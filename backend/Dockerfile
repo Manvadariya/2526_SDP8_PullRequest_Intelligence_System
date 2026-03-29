@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps
-COPY requirements.txt /app/requirements.txt
+COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY src/webhooks/ /app/
+COPY backend/src/webhooks/ /app/
 
 # Create directories
 RUN mkdir -p /app/workspaces/mirrors /app/workspaces/runs
