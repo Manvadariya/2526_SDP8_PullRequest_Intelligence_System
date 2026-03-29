@@ -32,3 +32,4 @@ image.png
 image1.png
 imagec.png
 deploy-to-dockerhub.ps1
+DEPLOY_TO_RENDER.md
